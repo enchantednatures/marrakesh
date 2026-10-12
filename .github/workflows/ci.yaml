@@ -264,6 +264,10 @@ jobs:
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v4
+        # SARIF ingestion via code scanning needs GitHub Advanced Security,
+        # which private repos on this account do not have; ship the report
+        # as a build artifact instead.
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: 'trivy-results.sarif'
+          name: trivy-results
+          path: trivy-results.sarif
