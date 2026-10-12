@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     curl \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cargo-chef
@@ -33,6 +34,7 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     curl \
     build-essential \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cargo-chef

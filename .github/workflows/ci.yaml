@@ -21,6 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install build dependencies
+        run: |
+          # The ARC runner image is minimal; the crates need a C linker and
+          # the rdkafka `cmake-build` feature needs cmake at compile time.
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev cmake
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -49,18 +56,13 @@ jobs:
   test:
     name: Test
     runs-on: marrakesh-runner
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev cmake
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -82,6 +84,19 @@ jobs:
         with:
           path: ~/.cargo/bin/rc
           key: rustfs-cli-0.1.36-${{ runner.os }}
+
+      - name: Start Redis
+        run: |
+          # ARC kubernetes-mode runners do not support GitHub service
+          # containers; run Redis on the pod's DinD daemon instead (the
+          # runner and dind share the pod network namespace, so the
+          # published port is reachable on localhost).
+          docker run -d --name redis -p 6379:6379 redis:7-alpine
+          for i in $(seq 1 30); do
+            docker exec redis redis-cli ping >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker exec redis redis-cli ping
 
       - name: Start RustFS
         run: |
@@ -123,7 +138,7 @@ jobs:
   # ==========================================================================
   manifests:
     name: Validate manifests
-    runs-on: ubuntu-latest
+    runs-on: marrakesh-runner
     steps:
       - uses: actions/checkout@v6
 

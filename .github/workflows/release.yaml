@@ -104,10 +104,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
-          # Note: RUST_BASE_IMAGE_TAG=release assumes rust:release exists
-          # If not available, the Dockerfile's ARG default (1.92-slim) is used
+          # NOTE: `rust:release` does not exist on Docker Hub; keep this in
+          # sync with the Dockerfile's RUST_BASE_IMAGE_TAG default.
           build-args: |
-            RUST_BASE_IMAGE_TAG=release
+            RUST_BASE_IMAGE_TAG=1.98-slim
 
       - name: Image digest
         run: |
