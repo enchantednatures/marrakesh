@@ -1,40 +1,39 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: default
+namespace: marrakesh
 
 resources:
   - ../../base
+  - namespace.yaml
+  - ghcr-pull-secret.sops.yaml
 
 components:
-  
   - ../../components/postgres
-  
-  
   - ../../components/postgres-pooler
-  
 
 patches:
   - target:
       kind: HelmRelease
       name: marrakesh
-    # JSON6902 instead of a strategic-merge patch: kustomize >= 5.4 rejects the
-    # empty-string `services.""` key during strategic merges (repository issue
-    # #136). RFC 6901 encodes the empty member as an empty path segment
-    # (double slash), which kustomize's JSON6902 implementation supports.
+    # JSON6902 throughout: the app env list must be REPLACED wholesale (a
+    # strategic merge would name-merge it with the base entries), and the
+    # same style is kept for the rest of the values.
     patch: |-
       - op: replace
-        path: /spec/values/services//image
+        path: /spec/values/services/app/image
         value:
-          repository: "kind-registry-dev:5000/marrakesh"
-          tag: "dev"
+          repository: "ghcr.io/enchantednatures/marrakesh"
+          tag: "latest"
+          imagePullSecrets:
+            - name: ghcr-pull-secret
       - op: replace
-        path: /spec/values/services//scaling
+        path: /spec/values/services/app/scaling
         value:
           minScale: 0
           maxScale: 3
       - op: replace
-        path: /spec/values/services//resources
+        path: /spec/values/services/app/resources
         value:
           requests:
             cpu: "100m"
@@ -42,62 +41,83 @@ patches:
           limits:
             cpu: "500m"
             memory: "256Mi"
-      # Replaces the base env list; must keep every base entry the app needs,
-      # including the gated S3 and PostgreSQL values.
+      # Replaces the base env list; must keep every entry the app needs.
+      # Backends: chart-managed Dragonfly (cache), external MinIO (S3),
+      # Tempo (OTLP), shared Redpanda (Kafka), CNPG via the PgBouncer pooler.
       - op: replace
-        path: /spec/values/services//env
+        path: /spec/values/services/app/env
         value:
           - name: APP_ENV
             value: "development"
           - name: APP__SERVER__PORT
             value: "8080"
           - name: APP__REDIS__URL
-            value: "redis://redis.redis.svc.cluster.local:6379"
-          
+            value: "redis://marrakesh-dragonfly.marrakesh.svc.cluster.local:6379"
           - name: APP__S3__ENDPOINT
-            value: "http://rustfs.rustfs.svc.cluster.local:9000"
+            value: "http://minio-service.networking.svc.cluster.local:9768"
           - name: APP__S3__BUCKET
-            value: "data"
+            value: "marrakesh"
           - name: APP__S3__REGION
             value: "us-east-1"
           - name: AWS_ACCESS_KEY_ID
-            value: "rustfsadmin"
+            valueFrom:
+              secretKeyRef:
+                name: pg-backup-secret
+                key: aws-access-key-id
           - name: AWS_SECRET_ACCESS_KEY
-            value: "rustfsadmin"
-          
+            valueFrom:
+              secretKeyRef:
+                name: pg-backup-secret
+                key: aws-secret-access-key
           - name: APP__TELEMETRY__OTLP_ENDPOINT
-            value: "http://otel-collector.observability.svc.cluster.local:4317"
+            value: "http://tempo-distributor.monitoring.svc.cluster.local:4317"
           - name: APP__TELEMETRY__SERVICE_NAME
-            value: "marrakesh-dev"
+            value: "marrakesh"
           - name: APP__TELEMETRY__LOG_LEVEL
             value: "debug"
           - name: RUST_LOG
             value: "debug,hyper=info,tower=info"
-          
-          # App DSN (postgresql://...) from the operator-generated
-          # <cluster>-app secret; consumed as APP__POSTGRES__URL.
           - name: APP__POSTGRES__URL
             valueFrom:
               secretKeyRef:
                 name: "marrakesh-postgres-app"
                 key: uri
-          
-          
+          # Route the sqlx pool through the PgBouncer Pooler service instead
+          # of <cluster>-rw (host swap only; credentials come from the URI).
+          - name: APP__POSTGRES__HOST
+            value: "marrakesh-postgres-rw-pooler"
           - name: APP__KAFKA__BROKER_URL
-            value: "kafka.kafka.svc.cluster.local:9092"
-          
-
-      
+            value: "redpanda-cluster.redpanda.svc.cluster.local:9092"
+      # Dedicated Dragonfly cache rendered by the ksvc chart (Dragonfly CR
+      # named marrakesh-dragonfly; the operator creates the matching Service).
       - op: replace
-        path: /spec/values/kafka/sources/events
+        path: /spec/values/dragonfly
         value:
-          bootstrapServers:
-            - "kafka.kafka.svc.cluster.local:9092"
-          consumers: 1
-          initialOffset: earliest
-      
+          enabled: true
+          replicas: 1
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          snapshot:
+            enabled: false
+          pdb:
+            minAvailable: 0
+            maxUnavailable: 1
+      - op: replace
+        path: /spec/values/kafka/sources/events/bootstrapServers
+        value:
+          - "redpanda-cluster.redpanda.svc.cluster.local:9092"
+      - op: replace
+        path: /spec/values/kafka/sources/events/consumers
+        value: 1
+      - op: replace
+        path: /spec/values/kafka/sources/events/initialOffset
+        value: earliest
 
-  
   # Per-env CloudNativePG sizing (component base carries prod-leaning defaults).
   - target:
       kind: Cluster
@@ -106,17 +126,39 @@ patches:
       - op: replace
         path: /spec/instances
         value: 1
-  # Per-env backup retention (ObjectStore base carries the prod default).
+      # Barman layout convention on this cluster: all app backups share the
+      # `cloudnative-pg` bucket, namespaced per server via serverName.
+      - op: add
+        path: /spec/plugins/0/parameters/serverName
+        value: "marrakesh-v1"
+  # Backup storage adapted to the home cluster's external MinIO
+  # (minio-service.networking:9768) with the Kyverno-replicated
+  # pg-backup-secret. Per-server prefix keeps retention scoped to
+  # marrakesh-v1 objects only.
   - target:
       kind: ObjectStore
       name: "marrakesh-postgres-backup-store"
     patch: |-
       - op: replace
+        path: /spec/configuration/endpointURL
+        value: "http://minio-service.networking.svc.cluster.local:9768"
+      - op: replace
+        path: /spec/configuration/destinationPath
+        value: "s3://cloudnative-pg/"
+      - op: replace
+        path: /spec/configuration/s3Credentials
+        value:
+          accessKeyId:
+            name: pg-backup-secret
+            key: aws-access-key-id
+          secretAccessKey:
+            name: pg-backup-secret
+            key: aws-secret-access-key
+      - op: replace
         path: /spec/retentionPolicy
         value: "7d"
-  
-  
-  # PgBouncer pooler instance count (see deploy/components/postgres/pooler).
+
+  # PgBouncer pooler instance count (see deploy/components/postgres-pooler).
   - target:
       kind: Pooler
       name: "marrakesh-postgres-rw-pooler"
@@ -124,5 +166,3 @@ patches:
       - op: replace
         path: /spec/instances
         value: 1
-  
-
