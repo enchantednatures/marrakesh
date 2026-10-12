@@ -20,6 +20,21 @@ patches:
     # strategic merge would name-merge it with the base entries), and the
     # same style is kept for the rest of the values.
     patch: |-
+      # Knative >=1.23 rejects valueFrom.fieldRef env vars; the ksvc chart's
+      # DLQ service hardcodes POD_NAME/POD_NAMESPACE via fieldRef. Strip the
+      # env list post-render — the event_display image does not need them.
+      - op: add
+        path: /spec/postRenderers
+        value:
+          - kustomize:
+              patches:
+                - target:
+                    kind: Service
+                    name: marrakesh-events-dlq
+                  patch: |-
+                    - op: replace
+                      path: /spec/template/spec/containers/0/env
+                      value: []
       - op: replace
         path: /spec/values/services/app/image
         value:
