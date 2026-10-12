@@ -6,6 +6,10 @@ namespace: marrakesh
 resources:
   - ../../base
   - namespace.yaml
+  # Kyverno generates a default-deny NetworkPolicy into every new namespace;
+  # app namespaces on this cluster ship an allow-all policy to lift it
+  # (same shape as home-automation / lakehouse).
+  - networkpolicy.yaml
   - ghcr-pull-secret.sops.yaml
 
 components:
@@ -141,6 +145,18 @@ patches:
       - op: replace
         path: /spec/instances
         value: 1
+      # The cluster's Kyverno require-pod-resources policy rejects pods
+      # without requests/limits — including the CNPG bootstrap job and the
+      # instance pod, which inherit spec.resources.
+      - op: add
+        path: /spec/resources
+        value:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
       # Barman layout convention on this cluster: all app backups share the
       # `cloudnative-pg` bucket, namespaced per server via serverName.
       - op: add
@@ -173,7 +189,9 @@ patches:
         path: /spec/retentionPolicy
         value: "7d"
 
-  # PgBouncer pooler instance count (see deploy/components/postgres-pooler).
+  # PgBouncer pooler instance count + explicit container resources (Kyverno
+  # require-pod-resources rejects the operator's resource-less default), and
+  # the cluster-wide istio dataplane-mode label the other poolers carry.
   - target:
       kind: Pooler
       name: "marrakesh-postgres-rw-pooler"
@@ -181,3 +199,18 @@ patches:
       - op: replace
         path: /spec/instances
         value: 1
+      - op: replace
+        path: /spec/template
+        value:
+          metadata:
+            labels:
+              istio.io/dataplane-mode: none
+          spec:
+            containers:
+              - name: pgbouncer
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 64Mi
+                  limits:
+                    memory: 128Mi
