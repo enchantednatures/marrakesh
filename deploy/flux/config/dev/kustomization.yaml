@@ -1,10 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  # Application only. The Flagger and CloudNativePG operators are installed
+  # cluster-wide from the HomeCluster repo on the target cluster — applying
+  # the template's own operator Kustomizations here would duplicate them and
+  # fight over the same HelmReleases.
   - ../../kustomization-dev.yaml
-  - ../../flagger-kustomization.yaml
-  - ../../cnpg-operator-kustomization.yaml
   - ../../gha-runner-kustomization.yaml
-  
-  
-  

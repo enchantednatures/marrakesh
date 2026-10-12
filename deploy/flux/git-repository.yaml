@@ -5,9 +5,11 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m
-  url: https://github.com/test-org/test-repo
+  url: ssh://git@github.com/enchantednatures/marrakesh.git
   ref:
     branch: main
-  # Optional: For private repositories
-  # secretRef:
-  #   name: github-deploy-key
+  # Private repository: SSH deploy key living in `marrakesh-git-auth`
+  # (identity / identity.pub / known_hosts), created by the bootstrap step
+  # (see deploy/flux/bootstrap/github-deploy-key.sops.yaml).
+  secretRef:
+    name: marrakesh-git-auth

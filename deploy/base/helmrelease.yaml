@@ -19,13 +19,18 @@ spec:
       labels:
         app.kubernetes.io/part-of: "marrakesh"
 
-    # Empty key "" produces service name = fullnameOverride (no suffix)
-    # via ksvc.serviceName: printf "%s-%s" fullname "" | trimSuffix "-"
+    # Named service key with an empty nameOverride so the Knative Service is
+    # named exactly fullnameOverride ("marrakesh"). A non-empty key is required
+    # because kafka.sources.*.sink must reference a services key and the chart
+    # rejects an empty sink value.
     services:
-      "":
+      app:
+        nameOverride: ""
         image:
-          repository: "ghcr.io/test-org/marrakesh"
+          repository: "ghcr.io/enchantednatures/marrakesh"
           tag: "latest"  # {"$imagepolicy": "flux-system:marrakesh:tag"}
+          imagePullSecrets:
+            - name: ghcr-pull-secret
         scaling:
           minScale: 1
           maxScale: 10
@@ -135,12 +140,12 @@ spec:
       sources:
         events:
           topic: "events"
-          consumerGroup: "{{project_name}}-consumers"
+          consumerGroup: "marrakesh-consumers"
           bootstrapServers:
             - "kafka.kafka.svc.cluster.local:9092"
           consumers: 3
           initialOffset: latest
-          sink: ""
+          sink: "app"
           delivery:
             retry: 5
             backoffPolicy: exponential

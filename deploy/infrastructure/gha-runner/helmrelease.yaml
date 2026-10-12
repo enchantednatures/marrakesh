@@ -22,7 +22,7 @@ spec:
   values:
     nameOverride: *name
     runnerScaleSetName: *name
-    githubConfigUrl: https://github.com/test-org/test-repo
+    githubConfigUrl: https://github.com/enchantednatures/marrakesh
     githubConfigSecret: github-auth-secret
     minRunners: 0
     maxRunners: 4
@@ -42,7 +42,7 @@ spec:
       kubernetesModeWorkVolumeClaim:
         accessModes:
           - ReadWriteOnce
-        storageClassName: openebs-hostpath
+        storageClassName: ceph-block
         resources:
           requests:
             storage: 50Gi
@@ -54,16 +54,16 @@ spec:
         priorityClassName: actions-runner-high-priority
         containers:
           - name: runner
-            image: ghcr.io/actions/actions-runner:2.331.0
+            image: ghcr.io/actions/actions-runner:2.338.0
             command:
               - /home/runner/run.sh
             resources:
               requests:
-                cpu: "2"
-                memory: 8Gi
+                cpu: "1"
+                memory: 2Gi
               limits:
-                cpu: "2"
-                memory: 8Gi
+                cpu: "4"
+                memory: 6Gi
             env:
               - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
                 value: "false"
@@ -88,11 +88,11 @@ spec:
               privileged: true
             resources:
               requests:
-                cpu: "2"
-                memory: 8Gi
+                cpu: 100m
+                memory: 512Mi
               limits:
-                cpu: "2"
-                memory: 8Gi
+                cpu: "1"
+                memory: 2Gi
             env:
               - name: DOCKER_TLS_CERTDIR
                 value: /certs

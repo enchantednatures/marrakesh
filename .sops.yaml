@@ -8,14 +8,10 @@
 # 4. Configure FluxCD to decrypt: Use sops.decryption in Kustomization
 
 creation_rules:
-  # Encrypt all Kubernetes secrets
-  - path_regex: \.yaml$
+  # Encrypt Kubernetes secrets only (`*.sops.yaml` suffix, data/stringData
+  # values only — metadata stays readable so diffs remain reviewable).
+  # The age recipient matches the `sops-age` secret in flux-system on the
+  # home cluster (same key used by the HomeCluster and porygon repos).
+  - path_regex: .*\.sops\.ya?ml$
     encrypted_regex: ^(data|stringData)$
-    age: >-
-      age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    # Replace above with your Age public key from: age-keygen -o age.key
-
-  # Encrypt SOPS-specific files
-  - path_regex: \.sops\.yaml$
-    age: >-
-      age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    age: age10vdnx33zyesr04jeeepdungzmzhj3572pz9ccev3zsj6dxhvz49slagxdv

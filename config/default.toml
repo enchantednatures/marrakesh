@@ -24,7 +24,7 @@ region = "us-east-1"
 [kafka]
 broker_url = "kafka.kafka.svc.cluster.local:9092"
 topic = "events"
-event_name = "com.{{project_name}}.event.published"
+event_name = "com.marrakesh.event.published"
 compression = "snappy"
 linger_ms = 5
 retries = 3

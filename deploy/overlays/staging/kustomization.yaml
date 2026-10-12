@@ -22,12 +22,12 @@ patches:
     # the issue #136 strategic-merge rationale.
     patch: |-
       - op: replace
-        path: /spec/values/services//scaling
+        path: /spec/values/services/app/scaling
         value:
           minScale: 1
           maxScale: 5
       - op: replace
-        path: /spec/values/services//resources
+        path: /spec/values/services/app/resources
         value:
           requests:
             cpu: "200m"
@@ -35,15 +35,18 @@ patches:
           limits:
             cpu: "800m"
             memory: "384Mi"
-
-      
+      # Subpath replaces (not a whole-object swap) so sink/topic/consumerGroup/
+      # delivery/dlq from the base keep applying.
       - op: replace
-        path: /spec/values/kafka/sources/events
+        path: /spec/values/kafka/sources/events/bootstrapServers
         value:
-          bootstrapServers:
-            - "kafka.staging.svc.cluster.local:9092"
-          consumers: 5
-          initialOffset: earliest
+          - "kafka.staging.svc.cluster.local:9092"
+      - op: replace
+        path: /spec/values/kafka/sources/events/consumers
+        value: 5
+      - op: replace
+        path: /spec/values/kafka/sources/events/initialOffset
+        value: earliest
       
 
   

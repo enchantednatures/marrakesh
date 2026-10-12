@@ -12,18 +12,12 @@ spec:
     name: marrakesh
   wait: true
   timeout: 5m
-  
-  dependsOn:
-    
-    - name: flagger
-    
-    
-    # CNPG operator (cluster-wide) must be ready before the overlay's postgres
-    # component (Cluster/ObjectStore/ScheduledBackup CRs) is applied.
-    - name: cnpg-operator
-    
-  
-  
+
+  # NOTE: no dependsOn on `flagger` / `cnpg-operator` here. On the home
+  # cluster those operators are installed cluster-wide from the HomeCluster
+  # repo (cluster-operators Kustomization), so this repo only ships the
+  # application and would otherwise fight the existing HelmReleases.
+
   # The overlay renders the CloudNativePG Cluster via deploy/components/postgres;
   # gate readiness on it. The namespace must match the overlay's `namespace:`
   # field (kustomize overrides every resource namespace with it).
@@ -31,13 +25,12 @@ spec:
     - apiVersion: postgresql.cnpg.io/v1
       kind: Cluster
       name: "marrakesh-postgres"
-      namespace: default
-  # SOPS decryption so the sops-encrypted `postgres-backup-storage` secret
-  # (deploy/base/object-storage-secret.yaml.example, added to the overlay by
-  # the user) can be committed encrypted. Requires an `sops-age` secret in the
-  # flux-system namespace on the target cluster.
+      namespace: marrakesh
+  # SOPS decryption for the committed sops-encrypted secrets
+  # (deploy/overlays/dev/ghcr-pull-secret.sops.yaml, deploy/flux/bootstrap/).
+  # Requires an `sops-age` secret in the flux-system namespace (present on the
+  # home cluster).
   decryption:
     provider: sops
     secretRef:
       name: sops-age
-  

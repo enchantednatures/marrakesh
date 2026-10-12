@@ -12,5 +12,6 @@ spec:
     name: marrakesh
   wait: true
   timeout: 5m
-  dependsOn:
-    - name: actions-runner-controller
+  # No dependsOn on `actions-runner-controller`: the ARC controller is
+  # installed cluster-wide from the HomeCluster repo (cluster-operators),
+  # not via a Kustomization managed by this repository.
