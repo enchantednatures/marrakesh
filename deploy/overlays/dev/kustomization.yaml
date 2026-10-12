@@ -10,6 +10,12 @@ resources:
   # app namespaces on this cluster ship an allow-all policy to lift it
   # (same shape as home-automation / lakehouse).
   - networkpolicy.yaml
+  # Public exposure: the cluster's wildcard Cloudflare tunnel forwards
+  # *.enchantednatures.com to the istio ingress gateways; the DomainMapping
+  # gives the ksvc a route on knative-ingress-gateway for that host. This
+  # cluster runs Knative with ClusterDomainClaims (no auto-create), so the
+  # claim is part of the manifest too.
+  - domain-mapping.yaml
   - ghcr-pull-secret.sops.yaml
 
 components:
@@ -49,7 +55,10 @@ patches:
       - op: replace
         path: /spec/values/services/app/scaling
         value:
-          minScale: 0
+          # Always-warm replica: the service is publicly exposed, so avoid
+          # cold starts (and the zero-endpoints state tools show while
+          # scaled to zero).
+          minScale: 1
           maxScale: 3
       - op: replace
         path: /spec/values/services/app/resources
