@@ -43,7 +43,7 @@ patches:
         path: /spec/values/services/app/image
         value:
           repository: "ghcr.io/enchantednatures/marrakesh"
-          tag: "sha-87597d1"
+          tag: "sha-f9fbd2e"
           imagePullSecrets:
             - name: ghcr-pull-secret
       - op: replace
