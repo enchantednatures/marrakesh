@@ -1,0 +1,43 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: marrakesh-staging
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./deploy/overlays/staging
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: marrakesh
+  wait: true
+  timeout: 5m
+  
+  dependsOn:
+    
+    - name: flagger
+    
+    
+    # CNPG operator (cluster-wide) must be ready before the overlay's postgres
+    # component (Cluster/ObjectStore/ScheduledBackup CRs) is applied.
+    - name: cnpg-operator
+    
+  
+  
+  # The overlay renders the CloudNativePG Cluster via deploy/components/postgres;
+  # gate readiness on it. The namespace must match the overlay's `namespace:`
+  # field (kustomize overrides every resource namespace with it).
+  healthChecks:
+    - apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      name: "marrakesh-postgres"
+      namespace: staging
+  # SOPS decryption so the sops-encrypted `postgres-backup-storage` secret
+  # (deploy/base/object-storage-secret.yaml.example, added to the overlay by
+  # the user) can be committed encrypted. Requires an `sops-age` secret in the
+  # flux-system namespace on the target cluster.
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  

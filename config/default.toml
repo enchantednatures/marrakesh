@@ -1,0 +1,42 @@
+# Default configuration
+# Override via environment-specific files or environment variables
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[redis]
+url = "redis://localhost:6379"
+
+[telemetry]
+service_name = "marrakesh"
+log_level = "info"
+# otlp_endpoint = "http://otel-collector:4317"  # Optional
+
+
+[s3]
+endpoint = "http://localhost:9000"  # RustFS/S3-compatible endpoint
+bucket = "data"
+region = "us-east-1"
+
+
+
+[kafka]
+broker_url = "kafka.kafka.svc.cluster.local:9092"
+topic = "events"
+event_name = "com.{{project_name}}.event.published"
+compression = "snappy"
+linger_ms = 5
+retries = 3
+timeout_ms = 10000
+
+
+
+[postgres]
+url = ""                    # overridden by APP__POSTGRES__URL injected from CNPG secret
+host = ""                   # blank locally; APP__POSTGRES__HOST points to the pooler in k8s
+ssl_mode = "verify-full"
+ssl_root_cert_path = "/etc/secrets/pg-ca/ca.crt"
+run_migrations = true
+max_connections = 5
+

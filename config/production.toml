@@ -1,0 +1,34 @@
+# Production environment configuration
+
+[telemetry]
+service_name = "marrakesh-prod"
+log_level = "info"
+otlp_endpoint = "http://otel-collector.observability.svc.cluster.local:4317"
+
+
+[s3]
+endpoint = "https://s3.amazonaws.com"
+bucket = "data"
+region = "us-east-1"
+
+
+
+[kafka]
+broker_url = "kafka.kafka.svc.cluster.local:9092"
+topic = "events"
+timeout_ms = 30000  # Longer timeout for prod reliability
+retries = 5
+
+
+
+[postgres]
+url = ""                    # overridden by APP__POSTGRES__URL injected from CNPG secret
+# Set by APP__POSTGRES__HOST in k8s when the PgBouncer Pooler is enabled;
+# blank locally so the operator-generated uri's <cluster>-rw host applies.
+host = ""
+ssl_mode = "verify-full"
+ssl_root_cert_path = "/etc/secrets/pg-ca/ca.crt"
+# sqlx migrate takes a pg advisory lock; concurrent pods wait, then reconcile and no-op
+run_migrations = true
+max_connections = 5
+

@@ -1,0 +1,41 @@
+---
+# Custom app-metric gate — the only MetricTemplate in this component.
+# Flagger's builtin request-success-rate / request-duration gates do NOT use
+# templates for the Knative provider: they are resolved by metric name from
+# the operator's metrics server (Kourier gateway Envoy stats).
+#
+# Replace the query below with a PromQL expression that reflects a business KPI
+# or application-level SLO for your service. This template is a placeholder — if
+# you don't need a custom gate, remove the corresponding entry from canary.yaml.
+#
+# Example use cases:
+#   - Error rate from your own /metrics endpoint
+#   - Queue depth (e.g., Kafka consumer lag)
+#   - Database connection pool saturation
+#   - SLO burn rate from recording rules
+#
+# The query must return a scalar. Flagger compares it to thresholdRange in canary.yaml.
+apiVersion: flagger.app/v1beta1
+kind: MetricTemplate
+metadata:
+  name: custom-metric
+  namespace: flagger-system
+spec:
+  provider:
+    type: prometheus
+    # Default: the dev observability Prometheus. Staging/prod overlays patch
+    # this address per environment (JSON6902 on kind: MetricTemplate — see
+    # deploy/overlays/{staging,prod}/kustomization.yaml and docs/FLAGGER.md).
+    address: http://prometheus.observability.svc.cluster.local:9090
+  query: vector(0)
+
+  # Replace the placeholder above with your application-specific PromQL.
+  # Template variables:  (canary revision name), ,
+  # . Example (error rate from the app's own counter):
+  #   sum(rate(http_requests_total{job="app", status=~"5.."}[]))
+  #   / sum(rate(http_requests_total{job="app"}[]))
+  #
+  # IMPORTANT: keep the query free of '#' comment lines and trailing prose —
+  # Flagger collapses the query to a single line (whitespace removal), so a
+  # leading comment turns the whole query into one Prometheus comment and the
+  # gate fails with "no expression found in input". vector(0) always passes.

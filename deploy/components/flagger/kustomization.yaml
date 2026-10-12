@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - canary.yaml
+  - metric-templates.yaml
+
+# The k6 script ConfigMap and the flagger-loadtester HelmRelease patch live in
+# deploy/infrastructure/flagger/operator (flagger-system namespace): the app
+# overlay's namespace transformer would relocate them to the app namespace,
+# where the loadtester pod (in flagger-system) could not mount the ConfigMap,
+# and the patch target (the loadtester HelmRelease) would not exist.
+
+labels:
+  - pairs:
+      component: flagger-canary
+      app.kubernetes.io/part-of: marrakesh
+    includeSelectors: false

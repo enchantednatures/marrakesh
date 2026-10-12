@@ -1,0 +1,113 @@
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rustfs
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rustfs
+  namespace: rustfs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rustfs
+  template:
+    metadata:
+      labels:
+        app: rustfs
+    spec:
+      containers:
+      - name: rustfs
+        image: rustfs/rustfs:1.0.1
+        args:
+          - /data
+        env:
+          - name: RUSTFS_ACCESS_KEY
+            value: "rustfsadmin"
+          - name: RUSTFS_SECRET_KEY
+            value: "rustfsadmin"
+        ports:
+          - name: api
+            containerPort: 9000
+          - name: console
+            containerPort: 9001
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 9000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 9000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+  namespace: rustfs
+spec:
+  selector:
+    app: rustfs
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+  type: ClusterIP
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rustfs-init
+  namespace: rustfs
+spec:
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: rc
+        image: rustfs/rc:v0.1.36
+        command:
+          - /bin/sh
+          - -c
+          - |
+            until rc alias set local http://rustfs.rustfs.svc.cluster.local:9000 rustfsadmin rustfsadmin >/dev/null 2>&1; do
+              echo "Waiting for RustFS..."
+              sleep 2
+            done
+            rc bucket create -p local/data
+            # Backup destination bucket for the CNPG ObjectStore: barman does
+            # not create buckets, so the dev init job must create it upfront.
+            rc bucket create -p "local/marrakesh-postgres-backups"
+            echo "Bucket creation completed"
+---
+# Dev-only credentials for the CNPG barman-cloud ObjectStore. The
+# ObjectStore CR references this secret by name (keys ACCESS_KEY_ID /
+# ACCESS_SECRET_KEY). Rotate along with the rustfs creds when hardening dev.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-backup-storage
+  namespace: default
+type: Opaque
+stringData:
+  ACCESS_KEY_ID: "rustfsadmin"
+  ACCESS_SECRET_KEY: "rustfsadmin"
+

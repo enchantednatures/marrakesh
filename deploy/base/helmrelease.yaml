@@ -1,0 +1,163 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: marrakesh
+  namespace: default
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: ./deploy/chart
+      sourceRef:
+        kind: GitRepository
+        name: marrakesh
+        namespace: flux-system
+      reconcileStrategy: Revision
+  values:
+    global:
+      fullnameOverride: "marrakesh"
+      labels:
+        app.kubernetes.io/part-of: "marrakesh"
+
+    # Empty key "" produces service name = fullnameOverride (no suffix)
+    # via ksvc.serviceName: printf "%s-%s" fullname "" | trimSuffix "-"
+    services:
+      "":
+        image:
+          repository: "ghcr.io/test-org/marrakesh"
+          tag: "latest"  # {"$imagepolicy": "flux-system:marrakesh:tag"}
+        scaling:
+          minScale: 1
+          maxScale: 10
+          target: 100
+          containerConcurrency: 100
+          timeoutSeconds: 300
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        probes:
+          liveness:
+            path: /health/live
+            port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readiness:
+            path: /health/ready
+            port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
+          capabilities:
+            drop:
+              - ALL
+        env:
+          - name: APP_ENV
+            value: "production"
+          - name: APP__SERVER__PORT
+            value: "8080"
+          - name: APP__REDIS__URL
+            valueFrom:
+              secretKeyRef:
+                name: "marrakesh-secrets"
+                key: redis-url
+          
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: "marrakesh-secrets"
+                key: aws-access-key-id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: "marrakesh-secrets"
+                key: aws-secret-access-key
+          - name: APP__S3__ENDPOINT
+            value: "http://rustfs:9000"
+          - name: APP__S3__BUCKET
+            value: "data"
+          - name: APP__S3__REGION
+            value: "us-east-1"
+          
+          - name: APP__TELEMETRY__OTLP_ENDPOINT
+            value: "http://otel-collector.observability.svc.cluster.local:4317"
+          - name: APP__TELEMETRY__SERVICE_NAME
+            value: "marrakesh"
+          
+          # App DSN (postgresql://...) from the operator-generated
+          # <cluster>-app secret; consumed as APP__POSTGRES__URL.
+          - name: APP__POSTGRES__URL
+            valueFrom:
+              secretKeyRef:
+                name: "marrakesh-postgres-app"
+                key: uri
+          
+          # Route the sqlx pool through the PgBouncer Pooler service. The
+          # CNPG `uri` secret always points at <cluster>-rw, so the override
+          # swaps the host while keeping credentials from that same secret.
+          # The pooler hostname must be in the Cluster's
+          # spec.certificates.serverAltDNSNames for verify-full to pass.
+          - name: APP__POSTGRES__HOST
+            value: "marrakesh-postgres-rw-pooler"
+          
+        
+        # PostgreSQL server CA certificate. Generated and rotated automatically
+        # by the CloudNativePG operator (secret <cluster>-ca, key ca.crt);
+        # mounted at the path config/*.toml expects (ssl_root_cert_path).
+        volumeMounts:
+          - name: postgres-ca
+            mountPath: /etc/secrets/pg-ca
+            readOnly: true
+        volumes:
+          - name: postgres-ca
+            secret:
+              secretName: "marrakesh-postgres-ca"
+              items:
+                - key: ca.crt
+                  path: ca.crt
+        
+
+    
+    kafka:
+      sources:
+        events:
+          topic: "events"
+          consumerGroup: "{{project_name}}-consumers"
+          bootstrapServers:
+            - "kafka.kafka.svc.cluster.local:9092"
+          consumers: 3
+          initialOffset: latest
+          sink: ""
+          delivery:
+            retry: 5
+            backoffPolicy: exponential
+            backoffDelay: "PT1S"
+          dlq:
+            enabled: true
+            image:
+              repository: "gcr.io/knative-releases/knative.dev/eventing/cmd/event_display"
+              tag: "latest"
+            scaling:
+              minScale: 0
+              maxScale: 2
+            resources:
+              requests:
+                cpu: "50m"
+                memory: "32Mi"
+              limits:
+                cpu: "200m"
+                memory: "128Mi"
+    

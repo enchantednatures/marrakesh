@@ -1,0 +1,30 @@
+# Development environment configuration
+
+[telemetry]
+service_name = "marrakesh-dev"
+log_level = "debug"
+otlp_endpoint = "http://localhost:4317"
+
+
+[s3]
+endpoint = "http://localhost:9000"
+bucket = "data"
+region = "us-east-1"
+
+
+
+[kafka]
+broker_url = "kafka.kafka.svc.cluster.local:9092"
+topic = "events"
+timeout_ms = 5000  # Shorter timeout for dev
+
+
+
+[postgres]
+url = ""                    # overridden by APP__POSTGRES__URL injected from CNPG secret
+host = ""                   # blank locally; APP__POSTGRES__HOST points to the pooler in k8s
+ssl_mode = "verify-full"    # server CA mounted in dev
+ssl_root_cert_path = "/etc/secrets/pg-ca/ca.crt"
+run_migrations = true
+max_connections = 5
+

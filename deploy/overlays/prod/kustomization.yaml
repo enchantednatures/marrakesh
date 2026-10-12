@@ -1,0 +1,102 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: production
+
+resources:
+  - ../../base
+
+components:
+  
+  - ../../components/flagger
+  
+  
+  - ../../components/postgres
+  
+
+patches:
+  - target:
+      kind: HelmRelease
+      name: marrakesh
+    # JSON6902 via RFC 6901 double-slash encoding — see deploy/overlays/dev for
+    # the issue #136 strategic-merge rationale.
+    patch: |-
+      - op: replace
+        path: /spec/values/services//scaling
+        value:
+          minScale: 2
+          maxScale: 20
+      - op: replace
+        path: /spec/values/services//resources
+        value:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "512Mi"
+
+      
+      - op: replace
+        path: /spec/values/kafka/sources/events
+        value:
+          bootstrapServers:
+            - "kafka.prod.svc.cluster.local:9092"
+          consumers: 10
+          initialOffset: latest
+          delivery:
+            retry: 10
+            backoffDelay: "PT2S"
+      
+
+  
+  # Per-env CloudNativePG sizing (component base carries prod-leaning defaults).
+  - target:
+      kind: Cluster
+      name: "marrakesh-postgres"
+    patch: |-
+      - op: replace
+        path: /spec/instances
+        value: 3
+  # Per-env backup retention (ObjectStore base carries the prod default).
+  - target:
+      kind: ObjectStore
+      name: "marrakesh-postgres-backup-store"
+    patch: |-
+      - op: replace
+        path: /spec/retentionPolicy
+        value: "30d"
+  
+  
+  # PgBouncer pooler instance count (see deploy/components/postgres/pooler).
+  - target:
+      kind: Pooler
+      name: "marrakesh-postgres-rw-pooler"
+    patch: |-
+      - op: replace
+        path: /spec/instances
+        value: 4
+  
+
+
+  
+  # Canary metric gates must query THIS environment's Prometheus. The flagger
+  # component's fallback (dev observability URL) does not exist here.
+  # See docs/FLAGGER.md "Prerequisites".
+  - target:
+      kind: MetricTemplate
+    patch: |-
+      - op: replace
+        path: /spec/provider/address
+        value: "http://prometheus.observability.svc.cluster.local:9090"
+  
+
+ 
+configMapGenerator:
+  - name: s3-config
+    behavior: create
+    literals:
+      - S3_ENDPOINT=https://s3.amazonaws.com
+      - S3_BUCKET=data-prod
+      - S3_REGION=us-east-1
+ 
