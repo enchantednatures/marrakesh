@@ -64,9 +64,10 @@ COPY . .
 RUN cargo build --release
 
 # ==============================================================================
-# Stage 3: Runtime (Debian Slim)
+# Stage 3: Runtime (Debian Slim — must match the builder's Debian release for
+# the linked glibc; rust:slim tracks the current stable, so this tracks trixie)
 # ==============================================================================
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 # Install CA certificates for TLS connections (Redis TLS, OTLP, etc.)
 RUN apt-get update && apt-get install -y \
