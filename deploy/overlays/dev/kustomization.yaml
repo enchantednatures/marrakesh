@@ -58,7 +58,7 @@ patches:
           # Always-warm replica: the service is publicly exposed, so avoid
           # cold starts (and the zero-endpoints state tools show while
           # scaled to zero).
-          minScale: 1
+          minScale: 0
           maxScale: 3
       - op: replace
         path: /spec/values/services/app/resources
