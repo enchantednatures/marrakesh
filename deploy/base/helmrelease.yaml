@@ -28,11 +28,11 @@ spec:
         nameOverride: ""
         image:
           repository: "ghcr.io/enchantednatures/marrakesh"
-          tag: "latest"  # {"$imagepolicy": "flux-system:marrakesh:tag"}
+          tag: "latest" # {"$imagepolicy": "flux-system:marrakesh:tag"}
           imagePullSecrets:
             - name: ghcr-pull-secret
         scaling:
-          minScale: 1
+          minScale: 0
           maxScale: 10
           target: 100
           containerConcurrency: 100
@@ -79,7 +79,7 @@ spec:
               secretKeyRef:
                 name: "marrakesh-secrets"
                 key: redis-url
-          
+
           - name: AWS_ACCESS_KEY_ID
             valueFrom:
               secretKeyRef:
@@ -96,12 +96,12 @@ spec:
             value: "data"
           - name: APP__S3__REGION
             value: "us-east-1"
-          
+
           - name: APP__TELEMETRY__OTLP_ENDPOINT
             value: "http://otel-collector.observability.svc.cluster.local:4317"
           - name: APP__TELEMETRY__SERVICE_NAME
             value: "marrakesh"
-          
+
           # App DSN (postgresql://...) from the operator-generated
           # <cluster>-app secret; consumed as APP__POSTGRES__URL.
           - name: APP__POSTGRES__URL
@@ -109,7 +109,7 @@ spec:
               secretKeyRef:
                 name: "marrakesh-postgres-app"
                 key: uri
-          
+
           # Route the sqlx pool through the PgBouncer Pooler service. The
           # CNPG `uri` secret always points at <cluster>-rw, so the override
           # swaps the host while keeping credentials from that same secret.
@@ -117,8 +117,7 @@ spec:
           # spec.certificates.serverAltDNSNames for verify-full to pass.
           - name: APP__POSTGRES__HOST
             value: "marrakesh-postgres-rw-pooler"
-          
-        
+
         # PostgreSQL server CA certificate. Generated and rotated automatically
         # by the CloudNativePG operator (secret <cluster>-ca, key ca.crt);
         # mounted at the path config/*.toml expects (ssl_root_cert_path).
@@ -133,9 +132,7 @@ spec:
               items:
                 - key: ca.crt
                   path: ca.crt
-        
 
-    
     kafka:
       sources:
         events:
@@ -165,4 +162,3 @@ spec:
               limits:
                 cpu: "200m"
                 memory: "128Mi"
-    
