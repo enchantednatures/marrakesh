@@ -4,5 +4,7 @@ version: 0.1.0
 type: application
 dependencies:
   - name: ksvc
-    version: "0.6.6"
+    # Temporary: pre-release for charts PR #113 (managed Kafka). Replace with
+    # the stable 0.10.x pin after #113 merges.
+    version: "0.10.0-pr.113.cfe87a8"
     repository: "oci://ghcr.io/enchantednatures/charts"
