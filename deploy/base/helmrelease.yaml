@@ -118,6 +118,9 @@ spec:
           - name: APP__POSTGRES__HOST
             value: "marrakesh-postgres-rw-pooler"
 
+          - name: APP__KAFKA__BROKER_URL
+            value: "marrakesh-kafka:9093"
+
         # PostgreSQL server CA certificate. Generated and rotated automatically
         # by the CloudNativePG operator (secret <cluster>-ca, key ca.crt);
         # mounted at the path config/*.toml expects (ssl_root_cert_path).
@@ -134,15 +137,114 @@ spec:
                   path: ca.crt
 
     kafka:
+      cluster:
+        enabled: true
+        provider: redpanda
+        name: "marrakesh-kafka"
+        replicas: 1
+        storage:
+          size: "10Gi"
+          storageClassName: "ceph-block"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "2.5Gi"
+        tls:
+          enabled: false
+        auth:
+          type: none
+        topics:
+          create: true
+          partitions: 3
+        redpanda:
+          extraClusterSpec:
+            # Kyverno in marrakesh rejects the chart's privileged tuning init
+            # container and pods without regular-container resources. Remove
+            # tuning and size the configurator, sidecar, and jobs explicitly.
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "2Gi"
+              limits:
+                cpu: "2"
+                memory: "2.5Gi"
+            config:
+              cluster:
+                auto_create_topics_enabled: true
+            console:
+              enabled: false
+            monitoring:
+              enabled: false
+            auth:
+              sasl:
+                enabled: false
+            statefulset:
+              initContainers:
+                tuning:
+                  tune_aio_events: false
+                  apply_host_tuners: false
+                configurator:
+                  resources:
+                    requests:
+                      cpu: "10m"
+                      memory: "64Mi"
+                    limits:
+                      memory: "128Mi"
+              podTemplate:
+                spec:
+                  containers:
+                    - name: sidecar
+                      resources:
+                        requests:
+                          cpu: "10m"
+                          memory: "256Mi"
+                        limits:
+                          memory: "512Mi"
+              sideCars:
+                resources:
+                  requests:
+                    cpu: "10m"
+                    memory: "256Mi"
+                  limits:
+                    memory: "512Mi"
+            post_install_job:
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  memory: "128Mi"
+            post_upgrade_job:
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  memory: "128Mi"
+      broker:
+        enabled: true
+        config:
+          topicPartitions: 3
+        delivery:
+          retry: 5
+          backoffPolicy: exponential
+          backoffDelay: "PT1S"
+      triggers:
+        events:
+          subscriber: "app"
+          delivery:
+            retry: 5
+            backoffPolicy: exponential
+            backoffDelay: "PT1S"
       sources:
         events:
           topic: "events"
           consumerGroup: "marrakesh-consumers"
-          bootstrapServers:
-            - "kafka.kafka.svc.cluster.local:9092"
           consumers: 3
           initialOffset: latest
-          sink: "app"
           delivery:
             retry: 5
             backoffPolicy: exponential
@@ -151,7 +253,7 @@ spec:
             enabled: true
             image:
               repository: "gcr.io/knative-releases/knative.dev/eventing/cmd/event_display"
-              tag: "latest"
+              tag: "v1.23.0"
             scaling:
               minScale: 0
               maxScale: 2

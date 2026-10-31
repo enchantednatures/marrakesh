@@ -35,12 +35,6 @@ patches:
           limits:
             cpu: "1000m"
             memory: "512Mi"
-      # Subpath replaces (not a whole-object swap) so sink/topic/consumerGroup/
-      # delivery/dlq from the base keep applying.
-      - op: replace
-        path: /spec/values/kafka/sources/events/bootstrapServers
-        value:
-          - "kafka.prod.svc.cluster.local:9092"
       - op: replace
         path: /spec/values/kafka/sources/events/consumers
         value: 10

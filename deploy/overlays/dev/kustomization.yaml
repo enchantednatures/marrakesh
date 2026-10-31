@@ -115,7 +115,7 @@ patches:
           - name: APP__POSTGRES__HOST
             value: "marrakesh-postgres-rw-pooler"
           - name: APP__KAFKA__BROKER_URL
-            value: "redpanda-cluster.redpanda.svc.cluster.local:9092"
+            value: "marrakesh-kafka:9093"
       # Dedicated Dragonfly cache rendered by the ksvc chart (Dragonfly CR
       # named marrakesh-dragonfly; the operator creates the matching Service).
       - op: replace
@@ -135,10 +135,6 @@ patches:
           pdb:
             minAvailable: 0
             maxUnavailable: 1
-      - op: replace
-        path: /spec/values/kafka/sources/events/bootstrapServers
-        value:
-          - "redpanda-cluster.redpanda.svc.cluster.local:9092"
       - op: replace
         path: /spec/values/kafka/sources/events/consumers
         value: 1
