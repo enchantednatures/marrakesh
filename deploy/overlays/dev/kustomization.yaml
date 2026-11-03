@@ -82,7 +82,7 @@ patches:
           - name: APP__REDIS__URL
             value: "redis://marrakesh-dragonfly.marrakesh.svc.cluster.local:6379"
           - name: APP__S3__ENDPOINT
-            value: "http://minio-service.networking.svc.cluster.local:9768"
+            value: "http://rustfs-service.networking.svc.cluster.local:9000"
           - name: APP__S3__BUCKET
             value: "marrakesh"
           - name: APP__S3__REGION
@@ -168,7 +168,7 @@ patches:
         path: /spec/plugins/0/parameters/serverName
         value: "marrakesh-v1"
   # Backup storage adapted to the home cluster's external MinIO
-  # (minio-service.networking:9768) with the Kyverno-replicated
+  # (rustfs-service.networking:9000) with the Kyverno-replicated
   # pg-backup-secret. Per-server prefix keeps retention scoped to
   # marrakesh-v1 objects only.
   - target:
@@ -177,7 +177,7 @@ patches:
     patch: |-
       - op: replace
         path: /spec/configuration/endpointURL
-        value: "http://minio-service.networking.svc.cluster.local:9768"
+        value: "http://rustfs-service.networking.svc.cluster.local:9000"
       - op: replace
         path: /spec/configuration/destinationPath
         value: "s3://cloudnative-pg/"
