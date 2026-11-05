@@ -7,7 +7,7 @@ This guide explains how to use Apache Kafka event sources with your Knative serv
 
 1. **Start development environment** (includes Kafka):
    ```bash
-   make dev-up
+   make local-up
    ```
 
 2. **Send a test event**:
@@ -23,8 +23,11 @@ This guide explains how to use Apache Kafka event sources with your Knative serv
 ## Configuration
 
 - **Topic**: `events`
-- **Consumer Group**: `{{project_name}}-consumers`
-- **Local Bootstrap Servers**: `kafka.kafka.svc.cluster.local:9092`
+- **Consumer Group**: `marrakesh-consumers`
+
+- **Managed Bootstrap Servers (derived)**: `marrakesh-kafka.<namespace>.svc.cluster.local:9093`
+- **App publisher URL**: `marrakesh-kafka:9093`
+
 
 
 ---
@@ -33,12 +36,14 @@ This guide explains how to use Apache Kafka event sources with your Knative serv
 
 This service integrates with Apache Kafka using Knative's **KafkaSource** event source. KafkaSource consumes messages from Kafka topics and automatically converts them to [CloudEvents](https://cloudevents.io/) before delivering them to your service.
 
-**Architecture:**
+
+**Architecture (managed mode):**
 ```
-Kafka Topic → KafkaSource → CloudEvent → Knative Service
+Kafka Topic → KafkaSource → Kafka Broker → Trigger → Knative Service
                   ↓ (on failure)
              Dead Letter Queue
 ```
+
 
 ### Topic-Per-Source Pattern
 
@@ -50,6 +55,81 @@ This template uses a **one KafkaSource per topic** pattern:
 
 To subscribe to multiple topics, create additional KafkaSource YAML files (see [Subscribing to Multiple Kafka Topics](#subscribing-to-multiple-kafka-topics)).
 
+
+---
+
+## Managed Kafka Cluster (opt-in)
+
+This project was generated with `kafka_managed_cluster=true` and
+`kafka_managed_provider=redpanda`. Instead of using an
+external Kafka cluster, the app chart deploys and manages Kafka in the
+application namespace.
+
+### What gets rendered
+
+- **redpanda** cluster `<project>-kafka` (1 replica, 10Gi on
+  the `ceph-block` StorageClass, no TLS/SASL) plus the source
+  **Topic** (`events`). Set `kafka_storage_class` at generation time;
+  leave it empty to use the cluster's default StorageClass.
+- **Knative Kafka Broker** `<project>-kafka-broker` with its ConfigMap
+  `<project>-kafka-broker-config`.
+- **Trigger** `<project>-events-trigger` that routes Broker events to
+  the `app` Knative Service.
+- **KafkaSource** `<project>-events-kafka-source` that consumes the
+  topic and sinks to the Broker.
+
+The chart derives the bootstrap automatically. The KafkaSource and Broker
+config do not set `bootstrapServers`, and the KafkaSource does not set `sink` —
+the Broker is the sink and the Trigger routes events to the app.
+
+
+The Redpanda bootstrap Service is
+`<project>-kafka.<namespace>.svc.cluster.local:9093`, and the app receives
+`APP__KAFKA__BROKER_URL=<project>-kafka:9093`.
+
+
+**Flow:** `Kafka topic -> KafkaSource -> Broker -> Trigger -> app Knative Service`
+
+### Prerequisites
+
+1. The operator for `redpanda` is installed.
+2. **Knative Kafka Broker/controller** installed (Eventing core + Kafka broker
+   and source data planes).
+
+3. **Kyverno exception** when Kyverno runs with a privileged-container policy.
+   The Redpanda operator always injects a privileged `tuning` init container.
+   The generated `deploy/kyverno/policyexception.yaml` exempts the managed
+   cluster. Apply it **separately, outside the namespaced overlay**:
+
+   ```bash
+   kubectl apply -f deploy/kyverno/policyexception.yaml
+   ```
+
+   The exception **must live in Kyverno's configured exception namespace**
+   (the reference cluster sets `--exceptionNamespace=kyverno-system`), not the
+   application namespace. Adjust `metadata.namespace` if your install differs.
+
+
+### Environment overlays
+
+- `deploy/overlays/dev`, `staging`, and `prod` keep the managed cluster/Broker
+  and do not patch an external `bootstrapServers`.
+- `deploy/dev/app-overlay` is the **Kind fallback**: Kind has no Redpanda/Strimzi
+  operator or Kafka Broker, so it removes `kafka.cluster`, `kafka.broker`, and
+  `kafka.triggers`, restores the KafkaSource `bootstrapServers` to
+  `kafka.kafka.svc.cluster.local:9092`, sets `sink: app`, and appends the local
+  `APP__KAFKA__BROKER_URL`. `make local-up` therefore uses the local Kafka
+  StatefulSet from `deploy/dev/infrastructure/kafka.yaml`.
+
+
+
+### Chart support
+
+Managed Kafka requires the ksvc chart that ships the `kafka.cluster`,
+`kafka.broker`, and `kafka.triggers` values (`ksvc >= 0.10.0`; the template
+pins `1.2.1`). Bucket notifications require `ksvc >= 1.2.1`.
+
+
 ---
 
 ## Prerequisites
@@ -57,7 +137,7 @@ To subscribe to multiple topics, create additional KafkaSource YAML files (see [
 ### Knative Eventing Kafka Controller
 
 **Local Development (Kind):**
-The Kafka controller is automatically installed when you run `make dev-up`. It includes:
+The Kafka controller is automatically installed when you run `make local-up`. It includes:
 - Knative Eventing core
 - Kafka source controller
 - Kafka source data plane
@@ -87,7 +167,7 @@ kubectl apply -f https://github.com/knative-extensions/eventing-kafka-broker/rel
 
 ### Kafka Cluster Configuration
 
-**Automatically deployed with `make dev-up`:**
+**Automatically deployed with `make local-up`:**
 - **Namespace**: `kafka`
 - **Bootstrap servers**: `kafka.kafka.svc.cluster.local:9092`
 
@@ -282,9 +362,11 @@ pub fn parse_event(ce_type: &str, body: &str) -> Result<EventPayload, AppError> 
 
 The template generates **one KafkaSource for one topic**. To subscribe to additional topics:
 
-### 1. Create Additional KafkaSource YAML
+### 1. Model the additional source
 
-**Example: `deploy/base/kafka-source-orders.yaml`**
+The chart renders one KafkaSource per `kafka.sources` entry. The equivalent
+manifest for an `orders` source looks like this (the chart fills in the sink and
+DLQ service names from the values):
 ```yaml
 apiVersion: sources.knative.dev/v1beta1
 kind: KafkaSource
@@ -315,16 +397,39 @@ spec:
   initialOffset: latest
 ```
 
-### 2. Add to Kustomization
+### 2. Add the source to the HelmRelease values
 
-**Update `deploy/base/kustomization.yaml`:**
+KafkaSources are rendered by the chart, not applied as raw manifests. Add a
+second entry under `spec.values.kafka.sources` in `deploy/base/helmrelease.yaml`
+and point `sink` at the named `services` key (`app`). Flux renders it on the next
+reconcile — there is no kustomization resource to add.
+
 ```yaml
-resources:
-  - knative-service.yaml
-  - kafka-source.yaml
-  - kafka-source-orders.yaml  # Add new source
-  - dlq-handler.yaml
+spec:
+  values:
+    kafka:
+      sources:
+        orders:
+          topic: "orders"
+          consumerGroup: "<project-name>-orders-consumers"
+          bootstrapServers:
+            - "kafka.kafka.svc.cluster.local:9092"
+          consumers: 3
+          initialOffset: latest
+          sink: "app"
+          delivery:
+            retry: 5
+            backoffPolicy: exponential
+            backoffDelay: "PT1S"
+          dlq:
+            enabled: true
+            image:
+              repository: "gcr.io/knative-releases/knative.dev/eventing/cmd/event_display"
+              tag: "latest"
 ```
+
+Each source gets its own `<project>-<source>-dlq` Service; the HelmRelease
+postRenderer strips the `fieldRef` env list Knative >= 1.23 rejects.
 
 ### 3. Create Topic
 
@@ -458,7 +563,7 @@ The template uses Knative's `event_display` container as a simple DLQ handler. T
 
 **For production**, replace the DLQ handler with a custom service:
 
-**Edit `deploy/base/dlq-handler.yaml`:**
+**Edit the DLQ settings under `spec.values.kafka.sources.<name>.dlq` in `deploy/base/helmrelease.yaml`:**
 ```yaml
 spec:
   template:
@@ -506,37 +611,13 @@ pub async fn handle_failed_event(event: CloudEvent<FailedEventData>) -> Result<J
 
 ## Production Configuration
 
-### External Kafka Setup
 
-For staging/prod environments, configure external Kafka clusters via overlay patches.
+With `kafka_managed_cluster=true` the KafkaSource bootstrap is derived from the
+chart-managed Redpanda cluster, so the external `bootstrapServers` patches in
+the staging/prod overlays are not rendered. Those overlays still tune
+`consumers`, `initialOffset`, and delivery retries. See
+[Managed Kafka Cluster (opt-in)](#managed-kafka-cluster-opt-in).
 
-**Staging:** `deploy/overlays/staging/kafka-source-patch.yaml`
-```yaml
-spec:
-  bootstrapServers:
-  - kafka.staging.svc.cluster.local:9092  # Your staging Kafka
-  consumers: 5
-  initialOffset: earliest  # Don't miss events
-```
-
-**Production:** `deploy/overlays/prod/kafka-source-patch.yaml`
-```yaml
-spec:
-  bootstrapServers:
-  - kafka.prod.svc.cluster.local:9092  # Your production Kafka
-  consumers: 10  # Scale based on load
-  initialOffset: earliest
-  
-  delivery:
-    retry: 10  # More retries in production
-    backoffPolicy: exponential
-    backoffDelay: PT2S
-    deadLetterSink:
-      ref:
-        apiVersion: serving.knative.dev/v1
-        kind: Service
-        name: <project-name>-dlq
-```
 
 ### Security (TLS/SASL)
 

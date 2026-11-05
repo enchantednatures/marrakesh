@@ -38,7 +38,7 @@ spec:
     # deploy/overlays/{staging,prod}/kustomization.yaml and docs/FLAGGER.md).
     # This operator install is cluster-wide: override in cluster management
     # tooling if this cluster's Prometheus lives elsewhere.
-    metricsServer: "http://prometheus.observability.svc.cluster.local:9090"
+    metricsServer: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
 
     # Cluster-wide watch — Flagger will manage Canary objects in all namespaces
     clusterName: ""

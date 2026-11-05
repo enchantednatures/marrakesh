@@ -3,7 +3,7 @@ name = "marrakesh"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
-authors = [" huntercasten@icloud.com" ]
+authors = ["Hunter Casten <huntercasten@icloud.com>"]
 description = "Rust microservice template for Knative + FluxCD"
 license = "MIT"
 

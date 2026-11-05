@@ -77,7 +77,7 @@ spec:
         metadata:
           cmd: >-
             hey -z 10s -q 5 -c 2
-            http://marrakesh.default.svc.cluster.local/health/live
+            http://marrakesh.marrakesh.svc.cluster.local/health/live
 
       # Stage 2 — Load test (rollout):
       # Runs on EACH analysis interval while traffic is being shifted. Traffic
@@ -94,7 +94,7 @@ spec:
         metadata:
           cmd: >-
             hey -z 1m -q 5 -c 2
-            http://marrakesh.default.svc.cluster.local/
+            http://marrakesh.marrakesh.svc.cluster.local/
 
       # Post-promotion notification webhook (optional)
       # Uncomment to trigger a Slack/PagerDuty alert on successful promotion

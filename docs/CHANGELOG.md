@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (template sync, 2026-11-05)
+
+- Regenerated from `rust-knative-flux-template` `7a156ff` (the managed Kafka
+  broker PR #189) and adopted `ksvc` 1.2.1.
+- Managed Kafka now comes from the chart: Redpanda cluster, Topic, Knative
+  Broker, Trigger, and KafkaSource. The hand-written Redpanda block and
+  `scripts/validate-managed-kafka-render.sh` are gone.
+- Dev deployment updated to the current home-cluster conventions:
+  `pg-rustfs-backup-secret` (Kyverno-replicated), `ceph-block` StorageClass,
+  and the `kube-prometheus-stack` Prometheus endpoint.
+- The template's CI, Dockerfile, Makefile, test harness, docs, and local Kind
+  overlay are refreshed to the merged template state.
+
 ### Added (PostgreSQL feature, shipped core)
 
 - `feature_postgres` now deploys a complete CloudNativePG stack as a Kustomize Component (`deploy/components/postgres/`): a `Cluster` (operator-managed TLS certs, `hostssl` pg_hba enforcement, SCRAM-SHA-256, bootstrap db/owner `app`, checksummed data, plugin-based WAL archiving), a barman-cloud `ObjectStore` (`barmancloud.cnpg.io/v1`, gzip data and WAL, retention per environment), and a `ScheduledBackup` (`method: plugin`, `target: primary`, `0 2 * * *`).

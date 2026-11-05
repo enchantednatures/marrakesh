@@ -23,7 +23,7 @@ During `cargo generate`, you specified:
 Enable Kafka event publishing? yes
 Kafka broker URL: kafka.kafka.svc.cluster.local:9092
 Kafka topic name: events
-CloudEvents event name: com.{{project_name}}.event.published
+CloudEvents event name: com.marrakesh.event.published
 ```
 
 ### Environment-Specific Configuration
@@ -113,7 +113,7 @@ use serde_json::json;
 
 // Create a CloudEvent with custom data
 let event = CloudEvent::new(
-    "com.{{project_name}}.event.published".to_string(),
+    "com.marrakesh.event.published".to_string(),
     "/api/v1/custom-handler".to_string(),
     Some(json!({
         "user_id": "user-123",
@@ -197,7 +197,7 @@ Each event publish operation creates a trace span:
 Span: kafka_publish
 ├─ event_id: "550e8400-e29b-41d4-a716-446655440000"
 ├─ topic: "events"
-├─ event_type: "com.{{project_name}}.event.published"
+├─ event_type: "com.marrakesh.event.published"
 ├─ source: "/api/v1/hello"
 ├─ partition: 2 (on success)
 ├─ offset: 12345 (on success)
@@ -421,7 +421,7 @@ Published events follow CloudEvents v1.0 specification:
 ```json
 {
   "specversion": "1.0",
-  "type": "com.{{project_name}}.event.published",
+  "type": "com.marrakesh.event.published",
   "source": "/api/v1/handler",
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "time": "2026-01-04T12:34:56Z",
@@ -435,7 +435,7 @@ Published events follow CloudEvents v1.0 specification:
 
 Fields:
 - **specversion**: CloudEvents spec version (always "1.0")
-- **type**: Event type (configured: `com.{{project_name}}.event.published`)
+- **type**: Event type (configured: `com.marrakesh.event.published`)
 - **source**: Origin of event (handler path)
 - **id**: Unique event identifier (UUID v4)
 - **time**: Event timestamp (RFC3339, UTC)

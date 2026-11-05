@@ -1,3 +1,8 @@
+
+# Expose the Knative service on marrakesh.enchantednatures.com. The ClusterDomainClaim is
+# only required on clusters that disable Knative's automatic domain claims
+# (config-domain `autoCreateClusterDomainClaim: "false"`); drop the claim on
+# clusters that create claims automatically.
 apiVersion: networking.internal.knative.dev/v1alpha1
 kind: ClusterDomainClaim
 metadata:
@@ -15,4 +20,4 @@ spec:
     name: marrakesh
     kind: Service
     apiVersion: serving.knative.dev/v1
-    namespace: marrakesh
+

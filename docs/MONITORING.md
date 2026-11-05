@@ -39,7 +39,7 @@ Application
                      └──────┘
 ```
 
-**Local Development** (via make dev-up):
+**Local Development** (via make local-up):
 - Jaeger: http://localhost:16686
 - Prometheus: http://localhost:9090
 - OpenTelemetry Collector: http://localhost:4317
@@ -335,7 +335,7 @@ http_request_duration_seconds_count{method="GET",path="/health/live"} 45
 
 ### Prometheus Scraping
 
-**Prometheus Configuration** (`docker/prometheus.yaml`):
+**Prometheus Configuration** (`deploy/dev/observability/prometheus.yaml.liquid`):
 ```yaml
 scrape_configs:
   - job_name: 'marrakesh'

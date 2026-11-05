@@ -7,8 +7,7 @@ resources:
   - ../../base
   - namespace.yaml
   # Kyverno generates a default-deny NetworkPolicy into every new namespace;
-  # app namespaces on this cluster ship an allow-all policy to lift it
-  # (same shape as home-automation / lakehouse).
+  # app namespaces on this cluster ship an allow-all policy to lift it.
   - networkpolicy.yaml
   # Public exposure: the cluster's wildcard Cloudflare tunnel forwards
   # *.enchantednatures.com to the istio ingress gateways; the DomainMapping
@@ -30,34 +29,20 @@ patches:
     # strategic merge would name-merge it with the base entries), and the
     # same style is kept for the rest of the values.
     patch: |-
-      # Knative >=1.23 rejects valueFrom.fieldRef env vars; the ksvc chart's
-      # DLQ service hardcodes POD_NAME/POD_NAMESPACE via fieldRef. Strip the
-      # env list post-render — the event_display image does not need them.
-      - op: add
-        path: /spec/postRenderers
-        value:
-          - kustomize:
-              patches:
-                - target:
-                    kind: Service
-                    name: marrakesh-events-dlq
-                  patch: |-
-                    - op: replace
-                      path: /spec/template/spec/containers/0/env
-                      value: []
       - op: replace
         path: /spec/values/services/app/image
         value:
           repository: "ghcr.io/enchantednatures/marrakesh"
+          # Replaced with the CI-built sha-<commit> after the template-sync PR
+          # merges. The cluster's Kyverno disallow-latest-tag policy requires a
+          # pinned tag.
           tag: "sha-2ae48a9"
           imagePullSecrets:
             - name: ghcr-pull-secret
       - op: replace
         path: /spec/values/services/app/scaling
         value:
-          # Always-warm replica: the service is publicly exposed, so avoid
-          # cold starts (and the zero-endpoints state tools show while
-          # scaled to zero).
+          # Scale-to-zero; cold starts are acceptable for this service.
           minScale: 0
           maxScale: 3
       - op: replace
@@ -70,8 +55,9 @@ patches:
             cpu: "500m"
             memory: "256Mi"
       # Replaces the base env list; must keep every entry the app needs.
-      # Backends: chart-managed Dragonfly (cache), external MinIO (S3),
-      # Tempo (OTLP), shared Redpanda (Kafka), CNPG via the PgBouncer pooler.
+      # Backends: chart-managed Dragonfly (cache), external RustFS (S3),
+      # Tempo (OTLP), chart-managed Redpanda (Kafka), CNPG via the PgBouncer
+      # pooler.
       - op: replace
         path: /spec/values/services/app/env
         value:
@@ -87,15 +73,17 @@ patches:
             value: "marrakesh"
           - name: APP__S3__REGION
             value: "us-east-1"
+          # The home cluster replicates the RustFS backup credentials into every
+          # namespace as pg-rustfs-backup-secret (Kyverno generating policy).
           - name: AWS_ACCESS_KEY_ID
             valueFrom:
               secretKeyRef:
-                name: pg-backup-secret
+                name: pg-rustfs-backup-secret
                 key: aws-access-key-id
           - name: AWS_SECRET_ACCESS_KEY
             valueFrom:
               secretKeyRef:
-                name: pg-backup-secret
+                name: pg-rustfs-backup-secret
                 key: aws-secret-access-key
           - name: APP__TELEMETRY__OTLP_ENDPOINT
             value: "http://tempo-distributor.monitoring.svc.cluster.local:4317"
@@ -114,11 +102,14 @@ patches:
           # of <cluster>-rw (host swap only; credentials come from the URI).
           - name: APP__POSTGRES__HOST
             value: "marrakesh-postgres-rw-pooler"
+          # Managed Redpanda: the chart publishes the internal listener on
+          # port 9093 (not the external 9092).
           - name: APP__KAFKA__BROKER_URL
             value: "marrakesh-kafka:9093"
       # Dedicated Dragonfly cache rendered by the ksvc chart (Dragonfly CR
       # named marrakesh-dragonfly; the operator creates the matching Service).
-      - op: replace
+      # `add` (not `replace`) because the base HelmRelease has no dragonfly key.
+      - op: add
         path: /spec/values/dragonfly
         value:
           enabled: true
@@ -142,7 +133,9 @@ patches:
         path: /spec/values/kafka/sources/events/initialOffset
         value: earliest
 
-  # Per-env CloudNativePG sizing (component base carries prod-leaning defaults).
+  # Per-env CloudNativePG sizing (the component base carries prod-leaning
+  # defaults). The base already carries pod resources and the ceph-block
+  # StorageClass, so only the instance count and Barman layout are patched.
   - target:
       kind: Cluster
       name: "marrakesh-postgres"
@@ -150,26 +143,15 @@ patches:
       - op: replace
         path: /spec/instances
         value: 1
-      # The cluster's Kyverno require-pod-resources policy rejects pods
-      # without requests/limits — including the CNPG bootstrap job and the
-      # instance pod, which inherit spec.resources.
-      - op: add
-        path: /spec/resources
-        value:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
       # Barman layout convention on this cluster: all app backups share the
       # `cloudnative-pg` bucket, namespaced per server via serverName.
       - op: add
         path: /spec/plugins/0/parameters/serverName
         value: "marrakesh-v1"
-  # Backup storage adapted to the home cluster's external MinIO
+
+  # Backup storage adapted to the home cluster's external RustFS
   # (rustfs-service.networking:9000) with the Kyverno-replicated
-  # pg-backup-secret. Per-server prefix keeps retention scoped to
+  # pg-rustfs-backup-secret. Per-server prefix keeps retention scoped to
   # marrakesh-v1 objects only.
   - target:
       kind: ObjectStore
@@ -185,18 +167,18 @@ patches:
         path: /spec/configuration/s3Credentials
         value:
           accessKeyId:
-            name: pg-backup-secret
+            name: pg-rustfs-backup-secret
             key: aws-access-key-id
           secretAccessKey:
-            name: pg-backup-secret
+            name: pg-rustfs-backup-secret
             key: aws-secret-access-key
       - op: replace
         path: /spec/retentionPolicy
         value: "7d"
 
-  # PgBouncer pooler instance count + explicit container resources (Kyverno
-  # require-pod-resources rejects the operator's resource-less default), and
-  # the cluster-wide istio dataplane-mode label the other poolers carry.
+  # PgBouncer pooler instance count plus the cluster-wide istio
+  # dataplane-mode label the other poolers carry. The base already carries the
+  # pgbouncer container resources required by Kyverno.
   - target:
       kind: Pooler
       name: "marrakesh-postgres-rw-pooler"
@@ -204,18 +186,8 @@ patches:
       - op: replace
         path: /spec/instances
         value: 1
-      - op: replace
-        path: /spec/template
+      - op: add
+        path: /spec/template/metadata
         value:
-          metadata:
-            labels:
-              istio.io/dataplane-mode: none
-          spec:
-            containers:
-              - name: pgbouncer
-                resources:
-                  requests:
-                    cpu: 50m
-                    memory: 64Mi
-                  limits:
-                    memory: 128Mi
+          labels:
+            istio.io/dataplane-mode: none

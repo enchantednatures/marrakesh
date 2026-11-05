@@ -111,11 +111,11 @@ kubectl logs -f deployment/marrakesh -n marrakesh
 cargo test
 
 # Build and push image
-docker build -t ghcr.io/test-org/marrakesh:fix-v1 .
-docker push ghcr.io/test-org/marrakesh:fix-v1
+docker build -t ghcr.io/enchantednatures/marrakesh:fix-v1 .
+docker push ghcr.io/enchantednatures/marrakesh:fix-v1
 
 # Deploy (via GitOps or manual)
-kubectl set image deployment/marrakesh user-container=ghcr.io/test-org/marrakesh:fix-v1 -n marrakesh
+kubectl set image deployment/marrakesh user-container=ghcr.io/enchantednatures/marrakesh:fix-v1 -n marrakesh
 
 # Verify deployment
 kubectl rollout status deployment/marrakesh -n marrakesh
@@ -347,7 +347,7 @@ aws s3 sync s3://marrakesh-data/ s3://marrakesh-data-backup/
 **Step 2: Deploy New Version**:
 ```bash
 # Deploy with new schema/migration
-kubectl set image deployment/marrakesh user-container=ghcr.io/test-org/marrakesh:v2.0 -n marrakesh
+kubectl set image deployment/marrakesh user-container=ghcr.io/enchantednatures/marrakesh:v2.0 -n marrakesh
 
 # Verify deployment
 kubectl rollout status deployment/marrakesh -n marrakesh

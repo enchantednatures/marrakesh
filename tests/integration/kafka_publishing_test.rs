@@ -4,7 +4,6 @@
 //! Uses testcontainers to provide an embedded Kafka broker for testing.
 
 use serde_json::json;
-use std::time::Duration;
 
 #[cfg(test)]
 mod kafka_tests {
@@ -68,7 +67,12 @@ mod kafka_tests {
 
         // Each event should have a unique ID (UUID v4)
         assert_ne!(event1.id(), event2.id());
-        assert_ne!(event1.time, event2.time);
+
+        // Timestamps are RFC 3339 with second resolution, so two events created
+        // in the same second may legitimately share a value. Assert the field
+        // is populated rather than unique.
+        assert!(!event1.time.is_empty());
+        assert!(!event2.time.is_empty());
     }
 
     /// Test dummy event creation
@@ -190,7 +194,7 @@ mod kafka_tests {
     async fn test_kafka_error_context() {
         let error = marrakesh::error::KafkaError::broker_unreachable(
             "kafka.example.com:9092",
-            "Connection refused: Network is unreachable"
+            "Connection refused: Network is unreachable",
         );
 
         let (error_type, error_context) = error.context();
@@ -202,9 +206,7 @@ mod kafka_tests {
     /// Test KafkaError PublishFailed context
     #[tokio::test]
     async fn test_kafka_error_publish_failed_context() {
-        let error = marrakesh::error::KafkaError::PublishFailed(
-            "Message too large".to_string()
-        );
+        let error = marrakesh::error::KafkaError::PublishFailed("Message too large".to_string());
 
         let (error_type, error_context) = error.context();
         assert_eq!(error_type, "publish_failed");
@@ -215,7 +217,7 @@ mod kafka_tests {
     #[tokio::test]
     async fn test_kafka_error_serialization_failed_context() {
         let error = marrakesh::error::KafkaError::SerializationFailed(
-            "JSON serialization error".to_string()
+            "JSON serialization error".to_string(),
         );
 
         let (error_type, error_context) = error.context();
@@ -226,9 +228,7 @@ mod kafka_tests {
     /// Test KafkaError TopicNotFound context
     #[tokio::test]
     async fn test_kafka_error_topic_not_found_context() {
-        let error = marrakesh::error::KafkaError::TopicNotFound(
-            "nonexistent-topic".to_string()
-        );
+        let error = marrakesh::error::KafkaError::TopicNotFound("nonexistent-topic".to_string());
 
         let (error_type, error_context) = error.context();
         assert_eq!(error_type, "topic_not_found");
@@ -244,7 +244,10 @@ mod kafka_tests {
         let error = marrakesh::error::KafkaError::broker_unreachable(broker, reason);
 
         match error {
-            marrakesh::error::KafkaError::BrokerUnreachable { broker: b, reason: r } => {
+            marrakesh::error::KafkaError::BrokerUnreachable {
+                broker: b,
+                reason: r,
+            } => {
                 assert_eq!(b, broker);
                 assert_eq!(r, reason);
             }
@@ -255,10 +258,7 @@ mod kafka_tests {
     /// Test KafkaError cloning for async task propagation
     #[tokio::test]
     async fn test_kafka_error_clone() {
-        let original = marrakesh::error::KafkaError::broker_unreachable(
-            "broker:9092",
-            "timeout"
-        );
+        let original = marrakesh::error::KafkaError::broker_unreachable("broker:9092", "timeout");
 
         let cloned = original.clone();
         let (t1, c1) = original.context();
@@ -268,25 +268,25 @@ mod kafka_tests {
         assert_eq!(c1, c2);
     }
 
-    /// Metrics Integration Notes
-    ///
-    /// The KafkaPublisher records the following Prometheus metrics:
-    ///
-    /// **Success Metrics:**
-    /// - `kafka_events_published_total{topic="..."}` - Counter incremented on successful publish
-    /// - `kafka_publish_latency_ms{topic="..."}` - Histogram recording publish latency
-    ///
-    /// **Failure Metrics:**
-    /// - `kafka_events_failed_total{topic="...", error_type="..."}` - Counter for failures
-    /// - `kafka_publish_latency_ms{topic="...", error="true"}` - Latency of failed attempts
-    ///
-    /// Metrics are:
-    /// 1. Exported via Prometheus `/metrics` endpoint
-    /// 2. Integrated with OpenTelemetry OTLP when configured
-    /// 3. Tagged with topic and error information for alerting and dashboards
-    ///
-    /// Example Prometheus queries:
-    /// - `rate(kafka_events_published_total[5m])` - Events/sec publish rate
-    /// - `kafka_publish_latency_ms` - Publish latency distribution
-    /// - `rate(kafka_events_failed_total[5m])` - Failure rate by error type
+    // Metrics integration notes
+    //
+    // The KafkaPublisher records the following Prometheus metrics:
+    //
+    // Success metrics:
+    // - `kafka_events_published_total{topic="..."}` - counter incremented on successful publish
+    // - `kafka_publish_latency_ms{topic="..."}` - histogram recording publish latency
+    //
+    // Failure metrics:
+    // - `kafka_events_failed_total{topic="...", error_type="..."}` - counter for failures
+    // - `kafka_publish_latency_ms{topic="...", error="true"}` - latency of failed attempts
+    //
+    // Metrics are:
+    // 1. Exported via the Prometheus `/metrics` endpoint
+    // 2. Integrated with OpenTelemetry OTLP when configured
+    // 3. Tagged with topic and error information for alerting and dashboards
+    //
+    // Example Prometheus queries:
+    // - `rate(kafka_events_published_total[5m])` - events/sec publish rate
+    // - `kafka_publish_latency_ms` - publish latency distribution
+    // - `rate(kafka_events_failed_total[5m])` - failure rate by error type
 }

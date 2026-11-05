@@ -1,8 +1,8 @@
 # Deployment Guide
 
-Complete guide for deploying {{ project_name }} to Kubernetes using Knative Serving and FluxCD GitOps.
+Complete guide for deploying marrakesh to Kubernetes using Knative Serving and FluxCD GitOps.
 
-> **About Template Variables**: This is a template file that uses Liquid syntax for variables like `{{ project_name }}`. During project generation with `cargo-generate`, these placeholders are replaced with your actual project values. The generated documentation will contain your specific project name instead of the template variable.
+> **About Template Variables**: This is a template file that uses Liquid syntax for variables like `marrakesh`. During project generation with `cargo-generate`, these placeholders are replaced with your actual project values. The generated documentation will contain your specific project name instead of the template variable.
 
 ## About Project Naming
 
@@ -27,12 +27,12 @@ When generating a project from this template, you'll be prompted for a `project_
 - `myservice` (single word)
 
 **Template Normalization**: The template automatically converts your input:
-- `{{ project_name | replace: "_", "-" }}` → Forces kebab-case for Kubernetes/Docker
-- `{{ crate_name }}` → Automatically converted to snake_case for Rust
+- `marrakesh` → Forces kebab-case for Kubernetes/Docker
+- `marrakesh` → Automatically converted to snake_case for Rust
 
 **Why This Matters**: Knative Services **cannot** contain underscores in their names. Using underscores will cause `ImagePullBackOff` errors because the image tag won't match the service name. The template handles this normalization automatically.
 
-> **For Detailed Information**: See the "Naming Conventions" section in [`../AGENTS.md`](../AGENTS.md) for comprehensive documentation on how naming works across all template files, common issues, and solutions.
+> **For Detailed Information**: Naming is normalized at generation time: Rust uses underscores, Kubernetes and Docker use hyphens. See the naming checks in `.github/workflows/naming-convention-tests.yaml` in the template repository.
 
 ## Table of Contents
 
@@ -118,33 +118,31 @@ Before deploying to Kubernetes, test locally:
 
 ```bash
 # Build image
-docker build -t {{ project_name }}:latest .
+docker build -t marrakesh:latest .
 
 # Tag for registry
-docker tag {{ project_name }}:latest {{ image_registry }}/{{ github_org }}/{{ project_name }}:v1.0.0
+docker tag marrakesh:latest ghcr.io/enchantednatures/marrakesh:v1.0.0
 
 # Push to registry
-docker push {{ image_registry }}/{{ github_org }}/{{ project_name }}:v1.0.0
+docker push ghcr.io/enchantednatures/marrakesh:v1.0.0
 ```
 
 ### 2. Test with Kind Development Environment
 
 ```bash
 # Start development environment
-make dev-up
+make local-up
 
 # Verify health
 curl http://localhost:8080/health/live
 curl http://localhost:8080/health/ready
 
 # Test API
-{% if feature_s3 %}
+
 curl -X POST http://localhost:8080/api/upload \
   -H "Content-Type: application/json" \
   -d '{"key":"test.txt","data":"aGVsbG8="}'
-{% else %}
-curl http://localhost:8080/metrics
-{% endif %}
+
 
 # View logs
 make dev-logs
@@ -154,7 +152,7 @@ make dev-logs
 
 ```bash
 # Start development environment
-make dev-up
+make local-up
 
 # Run tests
 cargo test -- --ignored --nocapture
@@ -167,37 +165,37 @@ cargo test -- --ignored --nocapture
 ### Create Namespace
 
 ```bash
-kubectl create namespace {{ project_name }}
+kubectl create namespace marrakesh
 ```
 
 ### Create Secrets
 
 ```bash
 # Redis connection
-kubectl create secret generic {{ project_name }}-secrets \
+kubectl create secret generic marrakesh-secrets \
   --from-literal=redis-url='redis://redis:6379' \
-  -n {{ project_name }}
+  -n marrakesh
 
-{% if feature_s3 %}
+
 # S3 credentials
-kubectl create secret generic {{ project_name }}-s3 \
+kubectl create secret generic marrakesh-s3 \
   --from-literal=aws-access-key-id='your-access-key' \
   --from-literal=aws-secret-access-key='your-secret-key' \
-  -n {{ project_name }}
-{% endif %}
+  -n marrakesh
+
 ```
 
 ### Deploy Base Service
 
 ```bash
 # Apply the base HelmRelease (Flux renders the Knative Service via deploy/chart)
-kubectl apply -k deploy/base -n {{ project_name }}
+kubectl apply -k deploy/base -n marrakesh
 
 # Get service URL
-kubectl get ksvc {{ project_name }} -n {{ project_name }}
+kubectl get ksvc marrakesh -n marrakesh
 
 # Test
-export URL=$(kubectl get ksvc {{ project_name }} -n {{ project_name }} -o jsonpath='{.status.url}')
+export URL=$(kubectl get ksvc marrakesh -n marrakesh -o jsonpath='{.status.url}')
 curl https://$URL/health/live
 ```
 
@@ -216,7 +214,7 @@ your-repo/
 │       ├── flux-system/
 │       │   ├── gotk-components.yaml
 │       │   └── kustomization.yaml
-│       └── {{ project_name }}/
+│       └── marrakesh/
 │           ├── kustomization.yaml
 │           └── apps.yaml
 ├── deploy/
@@ -228,11 +226,40 @@ your-repo/
 │       └── image-repository.yaml
 ```
 
+### One-command deploy (`make deploy`)
+
+After generating and pushing the repository:
+
+```bash
+# Private repositories: create the flux-system SSH deploy-key Secret once
+make git-auth
+
+# Commit the working tree, push, and (re)apply the Flux bootstrap for an env
+make deploy dev
+```
+
+`make deploy <env>` (env: dev, staging, prod) commits any pending changes, pushes, then applies the GitRepository + Kustomizations for that environment — the apply is a no-op after the first run, so day-to-day it is "commit + push + reconcile". Flux then reconciles `deploy/overlays/<env>`.
+
+Generation knobs that shape this flow:
+
+| Prompt | Effect |
+|---|---|
+| `git_auth_secret` | GitRepository pulls over SSH with a `secretRef`; empty keeps public HTTPS |
+| `image_pull_secret` | Adds `imagePullSecrets` to the app image; create the encrypted Secret from `deploy/overlays/dev/image-pull-secret.sops.yaml.example` |
+| `custom_domain` | Adds a `ClusterDomainClaim` + `DomainMapping` (dev overlay) for the given hostname |
+| `network_policy_allow_all` | Adds an allow-all NetworkPolicy to the dev namespace |
+| `target_namespace` | Namespace for every overlay (each renders a Namespace object when it is not `default`) |
+| `postgres_storage_class` | Sets `spec.storage.storageClass` on the CNPG `Cluster` (default `standard`) |
+| `postgres_instances_{dev,staging,prod}` | Replica count per environment (1/2/3) |
+| `postgres_pooler` | Adds the PgBouncer `Pooler` and routes the app through `APP__POSTGRES__HOST` |
+
+The Kubeconfig used by `make bootstrap`/`make deploy` is `$KUBECONFIG` when set, otherwise `CLUSTER_KUBECONFIG` (defaults to `~/.kube/config`). The local Kind cluster is `make local-up` / `make local-down`; SOPS configuration starts from the gitignored `.sops.yaml` (copy `.sops.yaml.example`); no Secret is SOPS-encrypted in the generated tree.
+
 ### Step 1: Create GitRepository
 
 ```bash
 # Create GitRepository source
-kubectl apply -f deploy/flux/git-repository.yaml -n {{ project_name }}
+kubectl apply -f deploy/flux/git-repository.yaml -n marrakesh
 ```
 
 `deploy/flux/git-repository.yaml`:
@@ -240,13 +267,13 @@ kubectl apply -f deploy/flux/git-repository.yaml -n {{ project_name }}
 apiVersion: source.toolkit.fluxcd.io/v1beta2
 kind: GitRepository
 metadata:
-  name: {{ project_name }}
-  namespace: {{ project_name }}
+  name: marrakesh
+  namespace: marrakesh
 spec:
   interval: 1m
-  url: https://github.com/{{ github_org }}/{{ github_repo }}
+  url: https://github.com/enchantednatures/marrakesh
   ref:
-    branch: {{ default_branch }}
+    branch: main
   secretRef:
     name: github-token
 ```
@@ -269,13 +296,13 @@ kubectl apply -f deploy/flux/kustomization-prod.yaml
 apiVersion: kustomize.toolkit.fluxcd.io/v1beta2
 kind: Kustomization
 metadata:
-  name: {{ project_name }}
-  namespace: {{ project_name }}
+  name: marrakesh
+  namespace: marrakesh
 spec:
   interval: 5m
   sourceRef:
     kind: GitRepository
-    name: {{ project_name }}
+    name: marrakesh
   path: ./deploy/overlays/prod
   prune: true
   timeout: 2m
@@ -290,10 +317,10 @@ Automatically update image references when new images are pushed:
 apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImageRepository
 metadata:
-  name: {{ project_name }}
-  namespace: {{ project_name }}
+  name: marrakesh
+  namespace: marrakesh
 spec:
-   image: {{ image_registry }}/{{ github_org }}/{{ project_name }}
+   image: ghcr.io/enchantednatures/marrakesh
   interval: 5m
   secretRef:
     name: registry-credentials
@@ -302,11 +329,11 @@ spec:
 apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImagePolicy
 metadata:
-  name: {{ project_name }}
-  namespace: {{ project_name }}
+  name: marrakesh
+  namespace: marrakesh
 spec:
   imageRepositoryRef:
-    name: {{ project_name }}
+    name: marrakesh
   policy:
     semver:
       range: ">=1.0.0"
@@ -317,11 +344,11 @@ spec:
 apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImagePolicy
 metadata:
-  name: {{ project_name }}-release
-  namespace: {{ project_name }}
+  name: marrakesh-release
+  namespace: marrakesh
 spec:
   imageRepositoryRef:
-    name: {{ project_name }}
+    name: marrakesh
   filterTags:
     pattern: '^release$'
   policy:
@@ -364,26 +391,28 @@ flux get kustomizations --watch
 
 ---
 
+
+
 ## Environment-Specific Deployment
 
 ### Development
 
 ```bash
 # Deploy to development namespace
-kubectl apply -k deploy/overlays/dev -n {{ project_name }}-dev
+kubectl apply -k deploy/overlays/dev -n marrakesh-dev
 
 # Configuration:
 # - Min 1 replica (no scale-to-zero)
 # - Debug logging
 # - RustFS for storage
-{% if feature_s3 %}# - Lower resource limits{% endif %}
+# - Lower resource limits
 ```
 
 `deploy/overlays/dev/kustomization.yaml`:
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: {{ project_name }}-dev
+namespace: marrakesh-dev
 resources:
   - ../../base
 
@@ -392,7 +421,7 @@ patchesStrategicMerge:
   apiVersion: serving.knative.dev/v1
   kind: Service
   metadata:
-    name: {{ project_name }}
+    name: marrakesh
   spec:
     template:
       metadata:
@@ -408,7 +437,7 @@ patchesStrategicMerge:
 
 ```bash
 # Deploy to staging namespace
-kubectl apply -k deploy/overlays/staging -n {{ project_name }}-staging
+kubectl apply -k deploy/overlays/staging -n marrakesh-staging
 
 # Configuration:
 # - 2-20 replicas
@@ -421,7 +450,7 @@ kubectl apply -k deploy/overlays/staging -n {{ project_name }}-staging
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: {{ project_name }}-staging
+namespace: marrakesh-staging
 resources:
   - ../../base
 
@@ -430,7 +459,7 @@ patches:
     apiVersion: serving.knative.dev/v1
     kind: Service
     metadata:
-      name: {{ project_name }}
+      name: marrakesh
     spec:
       template:
         metadata:
@@ -450,14 +479,14 @@ patches:
                   value: "staging"
   target:
     kind: Service
-    name: {{ project_name }}
+    name: marrakesh
 ```
 
 ### Production
 
 ```bash
 # Deploy to production namespace
-kubectl apply -k deploy/overlays/prod -n {{ project_name }}-prod
+kubectl apply -k deploy/overlays/prod -n marrakesh-prod
 
 # Configuration:
 # - 5-100 replicas
@@ -470,7 +499,7 @@ kubectl apply -k deploy/overlays/prod -n {{ project_name }}-prod
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: {{ project_name }}-prod
+namespace: marrakesh-prod
 resources:
   - ../../base
 
@@ -479,7 +508,7 @@ patches:
     apiVersion: serving.knative.dev/v1
     kind: Service
     metadata:
-      name: {{ project_name }}
+      name: marrakesh
     spec:
       template:
         metadata:
@@ -506,10 +535,10 @@ patches:
                     cpu: "500m"
   target:
     kind: Service
-    name: {{ project_name }}
+    name: marrakesh
 
 secretGenerator:
-- name: {{ project_name }}-secrets
+- name: marrakesh-secrets
   envs:
   - .env.production
 ```
@@ -522,16 +551,16 @@ secretGenerator:
 
 ```bash
 # List revisions
-kubectl revisions list -n {{ project_name }}
+kubectl revisions list -n marrakesh
 
 # Rollback to previous revision
-kubectl rollout undo service/{{ project_name }} -n {{ project_name }}
+kubectl rollout undo service/marrakesh -n marrakesh
 
 # Rollback to specific revision
-kubectl set traffic {{ project_name }} \
-  --revision={{ project_name }}-00001 \
+kubectl set traffic marrakesh \
+  --revision=marrakesh-00001 \
   --percent=100 \
-  -n {{ project_name }}
+  -n marrakesh
 ```
 
 ### Option 2: Git Rollback (GitOps)
@@ -544,7 +573,7 @@ git revert <commit-hash>
 git push origin main
 
 # Verify new revision deployed
-flux get kustomizations -n {{ project_name }}
+flux get kustomizations -n marrakesh
 ```
 
 ### Option 3: Canary Rollback
@@ -553,10 +582,10 @@ If using canary deployment:
 
 ```bash
 # Shift all traffic back to stable
-kubectl set traffic {{ project_name }} \
-  --revision={{ project_name }}-stable \
+kubectl set traffic marrakesh \
+  --revision=marrakesh-stable \
   --percent=100 \
-  -n {{ project_name }}
+  -n marrakesh
 ```
 
 ---
@@ -569,57 +598,57 @@ Knative supports traffic splitting between revisions for canary deployments.
 
 ```bash
 # Deploy new version
-kubectl set image service/{{ project_name }} \
-  user-container={{ image_registry }}/{{ github_org }}/{{ project_name }}:v2.0.0 \
-  -n {{ project_name }}
+kubectl set image service/marrakesh \
+  user-container=ghcr.io/enchantednatures/marrakesh:v2.0.0 \
+  -n marrakesh
 
 # Split traffic: 90% v1, 10% v2
-kubectl set traffic {{ project_name }} \
-  --revision={{ project_name }}-00001=90 \
-  --revision={{ project_name }}-00002=10 \
-  -n {{ project_name }}
+kubectl set traffic marrakesh \
+  --revision=marrakesh-00001=90 \
+  --revision=marrakesh-00002=10 \
+  -n marrakesh
 
 # Monitor traffic split
-kubectl describe ksvc {{ project_name }} -n {{ project_name }}
+kubectl describe ksvc marrakesh -n marrakesh
 ```
 
 ### Gradual Rollout
 
 ```bash
 # 10%
-kubectl set traffic {{ project_name }} \
-  --revision={{ project_name }}-00001=90 \
-  --revision={{ project_name }}-00002=10
+kubectl set traffic marrakesh \
+  --revision=marrakesh-00001=90 \
+  --revision=marrakesh-00002=10
 
 # Wait and monitor (e.g., check error rates in Prometheus)
 # Then increase to 25%
-kubectl set traffic {{ project_name }} \
-  --revision={{ project_name }}-00001=75 \
-  --revision={{ project_name }}-00002=25
+kubectl set traffic marrakesh \
+  --revision=marrakesh-00001=75 \
+  --revision=marrakesh-00002=25
 
 # 50%
-kubectl set traffic {{ project_name }} \
-  --revision={{ project_name }}-00001=50 \
-  --revision={{ project_name }}-00002=50
+kubectl set traffic marrakesh \
+  --revision=marrakesh-00001=50 \
+  --revision=marrakesh-00002=50
 
 # 100% to new version
-kubectl set traffic {{ project_name }} \
-  --revision={{ project_name }}-00002=100
+kubectl set traffic marrakesh \
+  --revision=marrakesh-00002=100
 ```
 
 ### Blue-Green Deployment
 
 ```bash
 # Create blue (current) revision
-kubectl set traffic {{ project_name }} \
-  --revision={{ project_name }}-00001=100
+kubectl set traffic marrakesh \
+  --revision=marrakesh-00001=100
 
 # Deploy green (new) revision
-kubectl apply -f deploy/overlays/prod -n {{ project_name }}
+kubectl apply -f deploy/overlays/prod -n marrakesh
 
 # Shift all traffic to green
-kubectl set traffic {{ project_name }} \
-  --revision={{ project_name }}-00002=100
+kubectl set traffic marrakesh \
+  --revision=marrakesh-00002=100
 
 # Keep blue for rollback
 # Delete blue later after verification
@@ -633,45 +662,45 @@ kubectl set traffic {{ project_name }} \
 
 ```bash
 # Get service URL
-kubectl get ksvc {{ project_name }} -n {{ project_name }}
+kubectl get ksvc marrakesh -n marrakesh
 
 # Get service details
-kubectl describe ksvc {{ project_name }} -n {{ project_name }}
+kubectl describe ksvc marrakesh -n marrakesh
 
 # Get pods
-kubectl get pods -n {{ project_name }} -l serving.knative.dev/service={{ project_name }}
+kubectl get pods -n marrakesh -l serving.knative.dev/service=marrakesh
 
 # Get revisions
-kubectl revisions list -n {{ project_name }}
+kubectl revisions list -n marrakesh
 ```
 
 ### Check FluxCD Status
 
 ```bash
 # Get FluxCD sources
-flux get sources git -n {{ project_name }}
+flux get sources git -n marrakesh
 
 # Get FluxCD kustomizations
-flux get kustomizations -n {{ project_name }}
+flux get kustomizations -n marrakesh
 
 # Sync manually
-flux reconcile kustomization {{ project_name }} -n {{ project_name }}
+flux reconcile kustomization marrakesh -n marrakesh
 
 # Get conditions
-flux get kustomizations -n {{ project_name }} --watch
+flux get kustomizations -n marrakesh --watch
 ```
 
 ### View Logs
 
 ```bash
 # Service logs
-kubectl logs -f -n {{ project_name }} deployment/{{ project_name }}
+kubectl logs -f -n marrakesh deployment/marrakesh
 
 # Specific pod
-kubectl logs -f -n {{ project_name }} <pod-name>
+kubectl logs -f -n marrakesh <pod-name>
 
 # Previous revision logs
-kubectl logs -f -n {{ project_name }} deployment/{{ project_name }} --previous
+kubectl logs -f -n marrakesh deployment/marrakesh --previous
 
 # Knative serving logs
 kubectl logs -n knative-serving deployment/controller
@@ -700,7 +729,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Run Clippy
@@ -709,7 +738,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run tests
         run: cargo test --all-features
   
@@ -717,9 +746,9 @@ jobs:
     needs: [lint, test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           push: true
           tags: |
@@ -754,9 +783,9 @@ jobs:
     needs: create-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build and push release image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           push: true
           tags: |
@@ -803,11 +832,11 @@ kubectl apply -f - <<EOF
 apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImagePolicy
 metadata:
-  name: {{ project_name }}-release
+  name: marrakesh-release
   namespace: flux-system
 spec:
   imageRepositoryRef:
-    name: {{ project_name }}
+    name: marrakesh
   filterTags:
     pattern: '^release$'
 EOF
@@ -817,11 +846,11 @@ kubectl apply -f - <<EOF
 apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImagePolicy
 metadata:
-  name: {{ project_name }}-semver
+  name: marrakesh-semver
   namespace: flux-system
 spec:
   imageRepositoryRef:
-    name: {{ project_name }}
+    name: marrakesh
   policy:
     semver:
       range: ">=1.0.0"
@@ -836,10 +865,10 @@ EOF
 
 ```bash
 # Describe service
-kubectl describe ksvc {{ project_name }} -n {{ project_name }}
+kubectl describe ksvc marrakesh -n marrakesh
 
 # Check conditions
-kubectl get ksvc {{ project_name }} -n {{ project_name }} -o jsonpath='{.status.conditions[*]}' | jq
+kubectl get ksvc marrakesh -n marrakesh -o jsonpath='{.status.conditions[*]}' | jq
 
 # Common issues:
 # - ImagePullBackOff: Check image registry credentials
@@ -851,13 +880,13 @@ kubectl get ksvc {{ project_name }} -n {{ project_name }} -o jsonpath='{.status.
 
 ```bash
 # Check pod status
-kubectl get pods -n {{ project_name }}
+kubectl get pods -n marrakesh
 
 # Get pod events
-kubectl describe pod <pod-name> -n {{ project_name }}
+kubectl describe pod <pod-name> -n marrakesh
 
 # Check pod logs
-kubectl logs <pod-name> -n {{ project_name }}
+kubectl logs <pod-name> -n marrakesh
 
 # Common issues:
 # - OOMKilled: Increase memory limits
@@ -873,14 +902,14 @@ kubectl logs -n flux-system deployment/source-controller
 kubectl logs -n flux-system deployment/kustomize-controller
 
 # Check GitRepository status
-kubectl get gitrepository -n {{ project_name }}
+kubectl get gitrepository -n marrakesh
 
 # Check Kustomization status
-kubectl get kustomization -n {{ project_name }}
+kubectl get kustomization -n marrakesh
 
 # Reconcile manually
 flux reconcile source git flux-system
-flux reconcile kustomization {{ project_name }} -n {{ project_name }}
+flux reconcile kustomization marrakesh -n marrakesh
 ```
 
 ---
@@ -893,7 +922,7 @@ flux reconcile kustomization {{ project_name }} -n {{ project_name }}
    - name: AWS_ACCESS_KEY_ID
      valueFrom:
        secretKeyRef:
-         name: {{ project_name }}-secrets
+         name: marrakesh-secrets
          key: aws-access-key-id
    ```
 
@@ -902,7 +931,7 @@ flux reconcile kustomization {{ project_name }} -n {{ project_name }}
    apiVersion: v1
    kind: ServiceAccount
    metadata:
-     name: {{ project_name }}
+     name: marrakesh
    ---
    apiVersion: rbac.authorization.k8s.io/v1
    kind: Role
@@ -917,11 +946,11 @@ flux reconcile kustomization {{ project_name }} -n {{ project_name }}
    apiVersion: networking.k8s.io/v1
    kind: NetworkPolicy
    metadata:
-     name: {{ project_name }}
+     name: marrakesh
    spec:
      podSelector:
        matchLabels:
-         serving.knative.dev/service: {{ project_name }}
+         serving.knative.dev/service: marrakesh
      policyTypes:
      - Ingress
      - Egress
@@ -930,7 +959,7 @@ flux reconcile kustomization {{ project_name }} -n {{ project_name }}
 4. **Image Vulnerability Scanning**:
    ```yaml
    - name: Run Trivy
-     run: trivy image --severity HIGH,CRITICAL ${{ secrets.REGISTRY }}/{{ project_name }}:${{ github.sha }}
+     run: trivy image --severity HIGH,CRITICAL ${{ secrets.REGISTRY }}/marrakesh:${{ github.sha }}
    ```
 
 See `docs/SECURITY.md` for complete security guidance.

@@ -5,11 +5,12 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m
+  # Private repositories pull over SSH with a deploy key stored in the
+  # `git_auth_secret` Secret (identity / identity.pub / known_hosts);
+  # create it with `make git-auth`. Public repositories use HTTPS.
   url: ssh://git@github.com/enchantednatures/marrakesh.git
   ref:
     branch: main
-  # Private repository: SSH deploy key living in `marrakesh-git-auth`
-  # (identity / identity.pub / known_hosts), created by the bootstrap step
-  # (see deploy/flux/bootstrap/github-deploy-key.sops.yaml).
   secretRef:
     name: marrakesh-git-auth
+  

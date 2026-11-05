@@ -12,6 +12,7 @@ use marrakesh::observability;
 use marrakesh::state::AppState;
 
 use metrics_exporter_prometheus::PrometheusHandle;
+
 use opendal::Operator;
 
 /// The global metrics recorder can only be installed once per process, but
@@ -62,5 +63,6 @@ fn create_test_storage() -> Operator {
         .endpoint("http://localhost:9000")
         .bucket("data")
         .region("us-east-1");
+
     Operator::new(builder).unwrap().finish()
 }

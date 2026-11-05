@@ -12,7 +12,7 @@ PostgreSQL metrics are exposed through:
 
 ### PodMonitor Configuration
 
-The `postgres-podmonitor.yaml` deploys two PodMonitors:
+The `Cluster`'s `monitoring.enablePodMonitor` deploys two PodMonitors:
 
 1. **postgres-metrics**: Scrapes metrics from PostgreSQL pods in the `default` namespace
    - Target: Pods with `postgresql=marrakesh-postgres` label
@@ -64,7 +64,7 @@ The `postgres-podmonitor.yaml` deploys two PodMonitors:
 
 ## Alert Rules
 
-All alerts are defined in `postgres-alerts.yaml` and organized by category:
+Alert rules can be added as a `PrometheusRule` next to the component and are organized by category:
 
 ### Backup Health Alerts
 
@@ -255,9 +255,9 @@ kubectl exec -it prometheus-pod -n monitoring -- \
 2. **Review operator logs**: `kubectl logs -l app.kubernetes.io/name=cloudnative-pg -n cnpg-system`
 3. **Verify storage connectivity**:
    ```bash
-   # RustFS example
+   # Dev bucket example (RustFS on Kind)
    kubectl exec -it marrakesh-postgres-1 -- \
-     s3cmd -c /opt/postgres/barmanrc get s3://postgres-backups/ /tmp/
+     s3cmd -c /opt/postgres/barmanrc get s3://marrakesh-postgres-backups/ /tmp/
    ```
 4. **Check operator version**: `kubectl get pods -n cnpg-system`
 5. **Escalate if unresolved**: Page on-call DBA

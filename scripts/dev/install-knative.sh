@@ -113,3 +113,5 @@ fi
 echo ""
 echo -e "${GREEN}✓ Knative Serving v${KNATIVE_VERSION} installed successfully${NC}"
 echo ""
+
+
