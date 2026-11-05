@@ -33,10 +33,9 @@ patches:
         path: /spec/values/services/app/image
         value:
           repository: "ghcr.io/enchantednatures/marrakesh"
-          # Replaced with the CI-built sha-<commit> after the template-sync PR
-          # merges. The cluster's Kyverno disallow-latest-tag policy requires a
-          # pinned tag.
-          tag: "sha-2ae48a9"
+          # CI-built sha-<commit> for the template-sync merge. The cluster's
+          # Kyverno disallow-latest-tag policy requires a pinned tag.
+          tag: "sha-61e5b61"
           imagePullSecrets:
             - name: ghcr-pull-secret
       - op: replace
