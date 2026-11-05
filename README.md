@@ -1,687 +1,385 @@
 # marrakesh
 
-A production-ready Rust microservice template for Knative Serverless and FluxCD GitOps, with optional S3-compatible storage support (RustFS/AWS S3), Apache Kafka event source integration, and event publishing capabilities.
-
+A production-ready Rust microservice for Knative Serverless and FluxCD GitOps, with S3-compatible object storage, Apache Kafka event integration.
 
 ## Features
 
 - 🚀 **Knative Serverless**: Auto-scaling HTTP service with CloudEvents support
-
-- 📦 **S3-Compatible Storage**: Integrated OpenDAL for RustFS/AWS S3 object storage
-
-
+- 📦 **S3-Compatible Storage**: Object storage through the Ceph RGW bucket provisioner (RustFS locally)
 - 📨 **Kafka Event Source**: Knative KafkaSource for consuming Kafka events
 - 🔁 **Topic-Per-Source Pattern**: One KafkaSource per topic for independent scaling
 - ⚰️ **Dead Letter Queue**: Automatic DLQ handling for failed events
-
-
-- 📤 **Kafka Event Publishing**: Optional event publishing from HTTP handlers
-- 🔄 **CloudEvents Standard**: Full CloudEvents 1.0 spec compliance via vendored axum-cloudevents
-- 📊 **Publisher Metrics**: Built-in Prometheus metrics for event publishing
-
-
+- 🐉 **Managed Kafka**: Chart-rendered Redpanda cluster, Knative Kafka Broker, and Trigger
+- 📤 **Kafka Event Publishing**: Non-blocking event publishing from HTTP handlers
+- 🔄 **CloudEvents Standard**: Full CloudEvents 1.0 support via the vendored `axum-cloudevents` crate
+- 📊 **Publisher Metrics**: Prometheus metrics for event publishing
+- 🐘 **PostgreSQL**: CloudNativePG cluster with TLS, PgBouncer pooling, and Barman backups
 - 🚦 **Canary Releases**: Automated progressive delivery with Flagger (Knative provider)
-
+- 🏃 **Self-Hosted Runners**: ARC runner scale set with a Docker-in-Docker sidecar
 - 🔍 **Observability**: OpenTelemetry instrumentation with Jaeger and Prometheus
 - 🔄 **GitOps Ready**: FluxCD manifests for automated deployments
-- 🏗️ **Infrastructure as Code**: Terraform modules for resource management
-- 🧪 **Fully Tested**: Integration tests with Redis, RustFS, and Kafka
-- 📝 **Type-Safe**: Rust with strict compiler checks
-- ⚡ **Fast**: Built on Tokio async runtime
+- 🧪 **Tested**: Unit, contract, and integration tests wired into CI
+- 📝 **Type-Safe**: Rust 2024 edition with strict compiler checks
+- ⚡ **Fast**: Built on the Tokio async runtime
 
-## Quick Start
+## Requirements
 
-### Local Development
+| Tool | Version | Needed for |
+|------|---------|------------|
+| Rust | 1.92+ (toolchain pinned in `rust-toolchain.toml`) | build, test |
+| Docker | 24+ | image builds, local Kind cluster |
+| kind | 0.20+ | `make local-up` |
+| kubectl | 1.28+ | local cluster, deployments |
+| helm | 3.14+ | chart rendering |
+| kustomize | 5.4+ | overlay rendering |
+| Flux CLI | 2.3+ | `make bootstrap` / `make deploy` (real clusters) |
 
-1. **Prerequisites**
-   - Docker & Docker Compose
-   - Rust 1.92+
-   - cargo-generate (optional, for new projects)
+## Local Development (Kind)
 
-2. **Start Local Services**
-   ```bash
-   docker-compose up -d
-   ```
+The local environment is a Kind cluster with a local container registry, Knative
+Serving, Redis, RustFS, CloudNativePG, Kafka and the
+observability stack (Jaeger, Prometheus, OTel Collector).
 
-   This starts:
-   - Redis (port 6379)
-   - RustFS with S3-compatible API (port 9000)
-   - RustFS Web Console (port 9001)
-   - Jaeger tracing (port 16686)
-   - Prometheus metrics (port 9090)
-   - OpenTelemetry Collector
+```bash
+# Create the cluster and deploy everything (takes a few minutes the first time)
+make local-up
 
-3. **Run the Service**
-   ```bash
-   # Configure environment (optional, defaults work)
-   export APP__SERVER__PORT=8080
-   export APP__REDIS__URL=redis://localhost:6379
-   
-   # Run with auto-reload
-   cargo watch -q -c -w src -x run
-   ```
+# In another terminal, expose the services on localhost
+make dev-forward
+```
 
-4. **Test S3 Integration**
-   ```bash
-   # Write object
-   curl -X POST http://localhost:8080/api/upload \
-     -H "Content-Type: application/json" \
-     -d '{"key": "test.txt", "data": "Hello RustFS"}'
-   
-   # List objects
-   curl http://localhost:8080/api/objects
-   
-   # Download object
-   curl http://localhost:8080/api/download/test.txt
-   ```
+| Service | URL |
+|---------|-----|
+| Application | http://localhost:8080 |
+| Jaeger UI | http://localhost:16686 |
+| Prometheus | http://localhost:9090 |
+| RustFS API | http://localhost:9000 |
+| RustFS console | http://localhost:9001 (`rustfsadmin` / `rustfsadmin`, local dev only) |
 
-5. **View Traces & Metrics**
-   - Jaeger: http://localhost:16686
-   - Prometheus: http://localhost:9090
-   - RustFS Console: http://localhost:9001 (rustfsadmin/rustfsadmin)
+Day-to-day commands:
 
-### Kubernetes Deployment
+```bash
+make dev-restart   # rebuild the image and redeploy the Knative service
+make dev-logs      # stream application logs
+make dev-status    # show pods/services across the dev cluster
+make dev-test      # run the integration tests against the local cluster
+make local-down    # delete the Kind cluster and local registry
+```
 
-1. **Prerequisites**
-    - Kubernetes 1.24+
-    - Knative 1.5+
-    - FluxCD
+`make dev-up` and `make dev-down` remain as deprecated aliases for
+`make local-up` and `make local-down`.
 
-2. **Deploy with FluxCD**
-    ```bash
-    # Bootstrap Flux to track this repo (applies GitRepository + ImageRepository)
-    make bootstrap
+Running the service outside the cluster (Redis assumed on localhost):
 
-    # Bootstrap a specific environment (e.g., production)
-    make bootstrap production
-    ```
+```bash
+export APP__REDIS__URL=redis://localhost:6379
+cargo run
+```
 
+## Deploying to a Cluster
 
-#### Kafka Event Source Deployment
+Deployment is GitOps-only: Flux is the single deployer, and CI never applies
+manifests. The overlays are `deploy/overlays/{dev,staging,prod}`.
 
-The KafkaSource and DLQ handler are automatically deployed with the application.
+```bash
+# First run only: apply the Flux GitRepository + Kustomizations for an env
+make bootstrap dev
 
-For production/staging, ensure external Kafka is configured:
-- Update `deploy/overlays/staging/kafka-source-patch.yaml` with staging Kafka servers
-- Update `deploy/overlays/prod/kafka-source-patch.yaml` with production Kafka servers
+# Commit, push, and (re)apply the Flux Kustomization for an env
+make deploy staging
+```
+
+`make deploy` is a no-op after the first bootstrap in terms of cluster state: it
+commits the working tree, pushes, and annotates the Flux Kustomization to
+reconcile. `FLUX_KUBECONFIG` (or `KUBECONFIG`) selects the target cluster.
+
+For private repositories, create the Flux SSH deploy-key Secret once:
+
+```bash
+make git-auth
+```
 
 
-3. **Deploy Directly**
-   ```bash
-   # Development environment
-   kubectl apply -k deploy/overlays/dev
-   
-   # Staging environment
-   kubectl apply -k deploy/overlays/staging
-   
-   # Production environment
-   kubectl apply -k deploy/overlays/prod
-   ```
+### PostgreSQL
 
-4. **Configure S3 Credentials**
-   ```bash
-   kubectl create secret generic marrakesh-s3 \
-     --from-literal=s3-endpoint=s3.amazonaws.com \
-     --from-literal=s3-bucket=my-bucket \
-     --from-literal=s3-region=us-east-1 \
-     --from-literal=aws-access-key-id=$AWS_ACCESS_KEY_ID \
-     --from-literal=aws-secret-access-key=$AWS_SECRET_ACCESS_KEY
-   ```
+The CloudNativePG operator is installed cluster-wide by Flux
+(`deploy/infrastructure/cnpg-operator`), and the `Cluster` lives in
+`deploy/components/postgres`. Application credentials come from the
+auto-generated `<cluster>-app` Secret; the CA is mounted at
+`/etc/secrets/pg-ca/ca.crt`.
+
+```bash
+make dev-postgres-status      # cluster health and ready instances
+make dev-postgres-psql        # psql into the primary (db/user: app)
+make dev-postgres-port-forward
+```
+
+Backups use the S3 bucket provisioned by the `ObjectBucketClaim` in the release
+namespace; see `docs/POSTGRES.md` and `docs/POSTGRES_BACKUP_RESTORE.md`.
+
+
+
+## Object Storage
+
+Deployed environments do not take S3 credentials from Git: the HelmRelease
+declares an `ObjectBucketClaim`, the cluster bucket provisioner (Ceph RGW)
+creates the bucket, and the app reads credentials from the
+`marrakesh-app-data` Secret plus the endpoint and
+bucket name from the same-named ConfigMap. Local Kind has no provisioner, so
+`deploy/dev/app-overlay` points the app at the in-cluster RustFS instance, whose
+init Job creates the same Secret/ConfigMap.
+
+See `docs/STORAGE.md` for the full contract and the external-S3 escape hatch.
+
+
+
+## Kafka Event Source
+
+This project was generated with `kafka_managed_cluster=true` and
+`kafka_managed_provider=redpanda`, so the app chart deploys
+Kafka itself: a **redpanda cluster**
+(`marrakesh-kafka`), a **Knative Kafka Broker**
+(`marrakesh-kafka-broker`), a **Trigger** routing
+`events` to the app, and the **KafkaSource**.
+
+
+The Redpanda bootstrap Service is
+`marrakesh-kafka:9093`, and the app's
+`APP__KAFKA__BROKER_URL` uses the same short name.
+
+The chart derives the bootstrap address from the cluster name and namespace, so
+no overlay sets `bootstrapServers`; with the Broker enabled the KafkaSource
+sinks to the Broker instead of the app.
+
+Prerequisites on a real cluster:
+
+
+- The [Redpanda operator](https://docs.redpanda.com/current/deploy/deployment-option/self-hosted/kubernetes/kubernetes-deploy/)
+  (Redpanda CRDs) is installed.
+- If Kyverno blocks privileged containers, apply the generated
+  `deploy/kyverno/policyexception.yaml` in Kyverno's exception namespace
+  (`kyverno-system` in the reference cluster), not in the app namespace.
+
+- The Knative Kafka Broker/controller is installed.
+
+
+
+Kind has no Redpanda operator, so `deploy/dev/app-overlay` reverts managed mode
+to the local Kafka StatefulSet (`kafka.kafka.svc.cluster.local:9092`) for
+`make local-up`.
+
+
+See `docs/KAFKA_EVENTING.md`.
+
+
+
+## Kafka Event Publishing
+
+HTTP handlers publish CloudEvents to Kafka without blocking the response. See
+`docs/KAFKA_PUBLISHING.md` for the publishing patterns, metrics, and tuning.
+
+
+
+
+
+## Canary Releases
+
+Flagger shifts traffic 10% at a time up to `maxWeight`, gating on HTTP success
+rate, p99 latency, and a custom Prometheus metric. Prometheus must be reachable
+from the cluster running canaries. See `docs/FLAGGER.md`.
+
+
+
+## Self-Hosted Runners
+
+The `gha-runner-scale-set` HelmRelease registers a runner scale set named
+`marrakesh-runner`. Reference it from workflows
+with `runs-on: marrakesh-runner`. The ARC controller
+and a `github-auth-secret` in `actions-runner-system` are cluster prerequisites.
+See `docs/SELF_HOSTED_RUNNERS.md`.
+
 
 ## Project Structure
 
 ```
 marrakesh/
 ├── src/
-│   ├── main.rs           # Application entry point with S3 setup and Kafka publisher
-│   ├── lib.rs            # Module exports
-│   ├── config.rs         # Configuration with S3Config and KafkaConfig
-│   ├── state.rs          # AppState with Redis, storage Operator, and Kafka publisher
-│   ├── error.rs          # Error handling
-│   ├── observability.rs  # OpenTelemetry setup (B3 propagation for Knative)
-│   ├── routes.rs         # Route definitions
-│   ├── handlers/
-│   │   ├── api.rs        # API handlers with S3 operations
-│   │   ├── health.rs     # Health check endpoints
-│   │   ├── kafka.rs       # Kafka event publishing handlers
-│   │   └── mod.rs        # Handler exports
+│   ├── main.rs             # Entry point and graceful shutdown
+│   ├── lib.rs              # Module exports
+│   ├── config.rs           # figment config (APP__* env overrides)
+│   ├── state.rs            # Shared AppState
+│   ├── error.rs            # AppError → HTTP mapping
+│   ├── observability.rs    # OpenTelemetry (B3 propagation for Knative)
+│   ├── routes.rs           # Router, rate limiting, middleware
+│   ├── middleware/         # Request ID and security headers
+│   └── handlers/
+│       ├── api.rs          # Versioned API handlers
+│       ├── events.rs       # CloudEvents sink
+│       ├── health.rs       # /health/* and /metrics
+│       ├── storage.rs      # S3 operations
+│       ├── items.rs        # sqlx demo CRUD
+│       ├── kafka.rs        # Event publishing
+│       └── mod.rs
 │
-├── crates/               # Vendored local dependencies
-│   ├── axum-cloudevents/ # CloudEvents extractor for Axum (vendored)
-│   │   ├── src/
-│   │   │   ├── extractor.rs  # CloudEvent extractor implementation
-│   │   │   ├── headers.rs    # CloudEvents HTTP header mapping
-│   │   │   ├── metadata.rs   # CloudEvent metadata types
-│   │   │   └── error.rs      # Error types
-│   │   └── Cargo.toml
-│   └── axum-cloudevents-macros/  # Proc macros for CloudEvents
+├── crates/                 # Vendored CloudEvents crates
+│   ├── axum-cloudevents/
+│   └── axum-cloudevents-macros/
 │
 ├── config/
-│   ├── default.toml      # Default configuration with S3 settings
-│   └── development.toml  # Development overrides
+│   ├── default.toml
+│   └── development.toml
 │
 ├── deploy/
-│   ├── base/
-│   │   ├── helmrelease.yaml         # Flux HelmRelease (S3 env vars via values)
-│   │   ├── secret.yaml.example      # Secret template for credentials
-│   │   └── kustomization.yaml       # Base Kustomize config
-│   ├── chart/                        # Local Helm chart (wraps ksvc dependency)
-│   ├── overlays/
-│   │   ├── dev/          # Development environment patches
-│   │   ├── staging/      # Staging environment patches
-│   │   └── prod/         # Production environment patches
-│   └── flux/             # FluxCD GitRepository and Kustomization
+│   ├── base/               # Flux HelmRelease + Kustomize base
+│   ├── chart/              # Local Helm chart wrapping the ksvc chart
+│   ├── overlays/           # dev / staging / prod patches
+│   ├── components/         # Optional Kustomize components
+│   ├── flux/               # Flux Kustomizations, per-env feature wiring
+│   ├── infrastructure/     # Cluster-wide operators (Flux-managed)
+│   └── dev/                # Imperative local-dev manifests (Kind only)
 │
-├── terraform/
-│   ├── main.tf           # Root module with MinIO module
-│   ├── variables.tf      # Input variables
-│   └── modules/minio/
-│       ├── main.tf       # MinIO bucket resources
-│       └── outputs.tf    # Bucket names output
-│
-├── tests/
-│   ├── health_test.rs    # Health endpoint tests
-│   ├── storage_test.rs   # S3 integration tests
-│   └── common/mod.rs     # Test utilities
-│
-├── docker/
-│   ├── otel-collector-config.yaml  # OpenTelemetry configuration
-│   └── prometheus.yaml             # Prometheus config
-│
-├── Cargo.toml            # Rust dependencies with conditional S3
-├── Dockerfile            # Multi-stage Docker build
-├── docker-compose.yaml   # Local development services with RustFS
-└── README.md             # This file
+├── scripts/dev/            # Local Kind lifecycle scripts
+├── terraform/              # Optional self-managed bucket module
+├── tests/                  # Unit and integration test targets
+├── Cargo.toml
+├── Makefile
+└── Dockerfile
 ```
 
 ## Configuration
 
-### Environment Variables
+Configuration is layered with `figment`: `config/default.toml`, then
+`config/<APP_ENV>.toml`, then environment variables. Every environment variable
+uses the `APP__` prefix with `__` as the separator, e.g.
+`APP__REDIS__URL`.
 
-**Server:**
-- `APP__SERVER__HOST`: Server bind address (default: 0.0.0.0)
-- `APP__SERVER__PORT`: Server port (default: 8080)
+### Core
 
-**Redis:**
-- `APP__REDIS__URL`: Redis connection URL (default: redis://localhost:6379)
-
-**S3/RustFS:**
-- `APP__S3__ENDPOINT`: S3 endpoint (default: http://rustfs:9000)
-- `APP__S3__BUCKET`: Bucket name (default: data)
-- `APP__S3__REGION`: AWS region (default: us-east-1)
-- `AWS_ACCESS_KEY_ID`: S3 access key
-- `AWS_SECRET_ACCESS_KEY`: S3 secret key
-
-
-**Kafka Event Publishing:**
-- `APP__KAFKA__BROKER_URL`: Kafka broker address (default: kafka.kafka.svc.cluster.local:9092)
-- `APP__KAFKA__TOPIC`: Kafka topic for publishing (default: events)
-- `APP__KAFKA__EVENT_NAME`: CloudEvents type for published events (default: com.marrakesh.event.published)
-- `APP__KAFKA__COMPRESSION`: Compression type (default: snappy, options: none, gzip, snappy, lz4, zstd)
-- `APP__KAFKA__LINGER_MS`: Batch linger time in milliseconds (default: 5)
-- `APP__KAFKA__TIMEOUT_MS`: Request timeout in milliseconds (default: 10000)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APP__SERVER__HOST` | `0.0.0.0` | Bind address |
+| `APP__SERVER__PORT` | `8080` | Listen port (Knative requires 8080) |
+| `APP__REDIS__URL` | `redis://localhost:6379` | Redis connection URL |
+| `APP__TELEMETRY__OTLP_ENDPOINT` | `http://localhost:4317` | OTLP collector endpoint |
+| `APP__TELEMETRY__SERVICE_NAME` | `marrakesh` | Trace service name |
+| `APP__TELEMETRY__LOG_LEVEL` | `info` | Log filter |
+| `RUST_LOG` | `info` | Rust log filter override |
 
 
-**Observability:**
-- `APP__TELEMETRY__OTLP_ENDPOINT`: OpenTelemetry collector (default: http://localhost:4317)
-- `APP__TELEMETRY__SERVICE_NAME`: Service name for traces (default: marrakesh)
-- `APP__TELEMETRY__LOG_LEVEL`: Log level (default: info)
-- `RUST_LOG`: Rust log filter (default: info)
+### PostgreSQL
 
-### Configuration Files
+| Variable | Description |
+|----------|-------------|
+| `APP__POSTGRES__URL` | Connection string; injected from the `<cluster>-app` Secret |
+| `APP__POSTGRES__HOST` | Host override, used to route through the PgBouncer pooler |
+| `APP__POSTGRES__MAX_CONNECTIONS` | Pool size per pod (default `5`) |
 
-**config/default.toml**
-```toml
-[server]
-host = "0.0.0.0"
-port = 8080
 
-[redis]
-url = "redis://localhost:6379"
 
-[s3]
-endpoint = "http://rustfs:9000"
-bucket = "data"
-region = "us-east-1"
+### S3 / RustFS
 
-[telemetry]
-otlp_endpoint = "http://localhost:4317"
-service_name = "marrakesh"
-log_level = "info"
-```
+| Variable | Description |
+|----------|-------------|
+| `APP__S3__ENDPOINT` | Endpoint, e.g. `http://$(BUCKET_HOST):$(BUCKET_PORT)` in-cluster |
+| `APP__S3__BUCKET` | Bucket name |
+| `APP__S3__REGION` | Region (default `us-east-1`) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Credentials from the provisioner Secret |
 
-**config/development.toml** (environment overrides)
-```toml
-[server]
-host = "127.0.0.1"
-port = 8080
 
-[telemetry]
-log_level = "debug"
-```
+
+### Kafka Publishing
+
+| Variable | Default |
+|----------|---------|
+| `APP__KAFKA__BROKER_URL` | `kafka.kafka.svc.cluster.local:9092` |
+| `APP__KAFKA__TOPIC` | `events` |
+| `APP__KAFKA__EVENT_NAME` | `com.example.service.event.published` |
+| `APP__KAFKA__COMPRESSION` | `snappy` (`none`, `gzip`, `snappy`, `lz4`, `zstd`) |
+| `APP__KAFKA__LINGER_MS` | `5` |
+| `APP__KAFKA__TIMEOUT_MS` | `10000` |
+
 
 ## API Endpoints
 
-### Health Checks
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health/live` | Liveness probe (never touches dependencies) |
+| `GET /health/ready` | Readiness probe (Redis, PostgreSQL) |
+| `GET /metrics` | Prometheus metrics |
+| `GET /` (POST for CloudEvents) | CloudEvents sink |
+| `GET /api/v1/hello` | Example handler |
 
-- `GET /health/live` - Liveness probe (always 200)
-- `GET /health/ready` - Readiness probe (checks Redis and S3)
-
-### S3 Storage (if enabled)
-
-- `POST /api/upload` - Upload object to S3
-  ```json
-  {
-    "key": "path/to/object",
-    "data": "base64-encoded-data"
-  }
-  ```
-
-- `GET /api/download/:key` - Download object from S3
-
-- `GET /api/objects` - List all objects in bucket
-
-- `DELETE /api/delete/:key` - Delete object from S3
-
-- `HEAD /api/stat/:key` - Get object metadata
+| `PUT /api/v1/items/{id}` | Upsert an item |
+| `GET /api/v1/items/{id}` | Read an item |
 
 
-### Kafka Event Publishing (if enabled)
+| `POST /api/v1/publish-event` | Publish a CloudEvent to Kafka |
 
-- `POST /api/v1/publish-event` - Publish a CloudEvent to Kafka (example endpoint)
-  ```json
-  {
-    "data": {
-      "key": "value"
-    }
-  }
-  ```
-  Response includes event ID for tracking:
-  ```json
-  {
-    "event_id": "uuid-here",
-    "status": "published"
-  }
-  ```
+| `GET /swagger-ui` | OpenAPI UI |
+| `GET /api-docs/openapi.json` | OpenAPI document |
 
-**Note**: Events are published asynchronously (non-blocking). The HTTP response returns immediately while the event is published in the background via `tokio::spawn`.
-
-**Metrics Available**:
-- `kafka_events_published_total`: Total events published (by topic)
-- `kafka_events_failed_total`: Total failed publishes (by topic and error_type)
-- `kafka_publish_latency_ms`: Publish latency histogram
-
-
-### Metrics
-
-- `GET /metrics` - Prometheus metrics in OpenMetrics format
-
-## Storage Integration (S3/RustFS)
-
-
-See [STORAGE.md](./STORAGE.md) for detailed S3/RustFS integration guide covering:
-- Architecture and design patterns
-- Configuration for RustFS and AWS S3
-- Code examples for CRUD operations
-- Testing with integration tests
-- Terraform bucket management
-- Production deployment
-
-
-
-## Kafka Event Source Integration
-
-See [docs/KAFKA_EVENTING.md](./docs/KAFKA_EVENTING.md) for detailed Kafka event source guide covering:
-- Architecture and topic-per-source pattern
-- Knative Kafka controller setup
-- Event type routing examples
-- Subscribing to multiple topics
-- Dead Letter Queue configuration
-- Production deployment with external Kafka
-- Monitoring and troubleshooting
-- Best practices for idempotency and error handling
-
-
-
-## Kafka Event Publishing
-
-See [docs/KAFKA_PUBLISHING.md](./docs/KAFKA_PUBLISHING.md) for detailed Kafka event publishing guide covering:
-- Publishing events from HTTP handlers
-- CloudEvents format and compliance
-- Non-blocking publish patterns with tokio::spawn
-- Error handling and retry strategies
-- Prometheus metrics for publisher monitoring
-- Configuration and performance tuning
-- Cold start impact and optimization
-
-
-## Vendored Dependencies
-
-This template includes vendored (local) crates in the `crates/` directory:
-
-### axum-cloudevents
-
-A custom CloudEvents integration for Axum that provides:
-- **CloudEvent Extractor**: Automatically parse CloudEvents from HTTP requests
-- **Header Mapping**: Convert CloudEvents HTTP headers to CloudEvent fields
-- **Structured & Binary Modes**: Support for both CloudEvents content modes
-- **Type Safety**: Full Rust type safety for CloudEvents metadata
-
-This crate is vendored to provide:
-1. **Custom functionality** tailored for this template's needs
-2. **No external dependencies** on unmaintained or incompatible crates
-3. **Full control** over CloudEvents implementation
-4. **Easy customization** for your specific use case
-
-The crate is referenced as a path dependency in `Cargo.toml`:
-```toml
-axum-cloudevents = { path = "crates/axum-cloudevents" }
-```
-
-You can modify the vendored crate directly in `crates/axum-cloudevents/` to add custom functionality.
+`/api/v1/*` is rate limited to 100 requests/second with a burst of 50 per client
+IP; probes, metrics, and the CloudEvents sink are exempt. See `docs/API.md`.
 
 ## Development
 
-### Adding New Routes
-
-Edit `src/routes.rs`:
-```rust
-use axum::{Router, routing::get};
-use crate::handlers;
-
-pub fn routes() -> Router {
-    Router::new()
-        .route("/api/new", get(handlers::new_handler))
-}
+```bash
+cargo fmt --all                 # format
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test                      # unit + integration tests
+cargo test --all-features
+cargo bench                     # criterion benchmarks
 ```
 
-Edit `src/handlers/api.rs`:
-```rust
-pub async fn new_handler(State(state): State<AppState>) -> impl IntoResponse {
-    // Your handler logic
-}
-```
+CI runs the same commands for the all-features project, plus a release-profile
+build. See `docs/DEVELOPMENT.md` and `docs/TESTING.md`.
 
-### Running Tests
+### Building the Image
 
 ```bash
-# Run all tests
-cargo test
-
-# Run with output
-cargo test -- --nocapture
-
-# Run specific test
-cargo test test_name
-
-# Integration tests with services
-docker-compose up -d && cargo test --test '*'
-```
-
-### Code Quality
-
-```bash
-# Format code
-cargo fmt
-
-# Lint with clippy
-cargo clippy -- -D warnings
-
-# Check documentation
-cargo doc --no-deps --open
-```
-
-### Building for Production
-
-```bash
-# Build optimized binary
 cargo build --release
-
-# Build Docker image
 docker build -t marrakesh:latest .
-
-# Build with musl for Alpine
-cargo build --release --target x86_64-unknown-linux-musl
 ```
 
-## Kubernetes Configuration
-
-### Knative Service (deploy/base/helmrelease.yaml)
-
-The service is configured through the Flux HelmRelease values (rendered by `deploy/chart` via the `ksvc` chart dependency):
-- Auto-scaling: min 0, max 100 replicas
-- Health checks: liveness and readiness probes
-- Resource limits: 512Mi memory, 1000m CPU
-- CloudEvents: Full support for event-driven workloads
-- S3 credentials: Mounted from Kubernetes Secret
-
-### Environment Overlays
-
-**dev/** - Development settings
-- 1-10 replicas
-- Debug logging
-- RustFS endpoint
-
-**staging/** - Staging settings
-- 2-20 replicas
-- Info logging
-- AWS S3 with credentials from secret
-
-**prod/** - Production settings
-- 5-100 replicas
-- Warn logging
-- AWS S3 with secret management
-
-Apply with:
-```bash
-kubectl apply -k deploy/overlays/prod
-```
-
-## FluxCD GitOps
-
-### Initial Setup
-
-1. Create Git repository with this template
-2. Configure FluxCD to watch the repository:
-   ```bash
-   flux bootstrap github \
-     --owner=your-org \
-     --repo=your-repo \
-     --personal \
-     --path=clusters/production
-   ```
-
-3. Create FluxCD Kustomization:
-   ```bash
-   # Bootstrap Flux to track this repo
-   make bootstrap
-
-   # Then bootstrap an environment
-   make bootstrap production
-   ```
-
-### Automated Deployments
-
-The `deploy/flux/image-update-automation.yaml` automatically:
-- Monitors container registry for new images
-- Updates image references in manifests
-- Commits changes to Git
-- Triggers Knative service updates
+The Dockerfile is a multi-stage build using `cargo-chef`; the runtime stage
+installs `ca-certificates`, `curl`, and `tzdata` and runs as the non-root
+`appuser`. The Docker `HEALTHCHECK` calls `/health/live` with `curl`; Knative
+ignores it and uses HTTP probes.
 
 ## Observability
 
-### Jaeger Tracing
+- **Traces**: OTLP → Jaeger, B3 headers propagated through Knative and Kafka.
+- **Metrics**: Prometheus scrapes `/metrics` (HTTP latency, Redis, publisher and Knative metrics).
+- **Logs**: structured `tracing` output with request IDs.
 
-View distributed traces: http://localhost:16686
-
-The service instruments:
-- HTTP requests (Axum integration)
-- Redis operations
-- S3/OpenDAL operations (custom spans)
-- Custom business logic spans
-
-### Prometheus Metrics
-
-View metrics: http://localhost:9090
-
-Exported metrics:
-- HTTP request duration and count (by method, path, status)
-- Redis connection pool stats
-- Custom application metrics
-
-
-### Canary Metric Gates
-
-Flagger evaluates canary gates against Prometheus (see `docs/FLAGGER.md`). The gate
-address is configured **per environment** at generation time
-(`flagger_prometheus_url_{staging,prod}`) and must be reachable from every cluster
-that runs canaries — the defaults point at the dev-only observability stack
-(`make dev-observability`).
-
-
-### Logs
-
-Structured logging with:
-- Request ID tracing
-- Service context
-- Correlation IDs for distributed tracing
-
-View with:
-```bash
-RUST_LOG=debug cargo run
-docker logs <container-id>
-```
-
-## Terraform Infrastructure
-
-### Deploy Buckets
-
-```bash
-cd terraform
-terraform init
-terraform plan
-terraform apply
-```
-
-Variables:
-```hcl
-minio_endpoint = "http://rustfs:9000"
-minio_access_key = "rustfsadmin"
-minio_secret_key = "rustfsadmin"
-```
-
-Output:
-```hcl
-bucket_names = ["data", "data-staging", "data-prod"]
-```
+See `docs/MONITORING.md` and `docs/RUNBOOKS.md`.
 
 ## Troubleshooting
 
-### Redis Connection Fails
 ```bash
-# Check Redis is running
-docker-compose ps redis
-
-# Verify connection
-redis-cli -h localhost ping
+make dev-status                          # cluster and service status
+make dev-logs                            # application logs
+kubectl get ksvc -n marrakesh   # Knative service state
+kubectl describe ksvc marrakesh -n marrakesh
 ```
 
-### RustFS Access Issues
-```bash
-# Check RustFS is healthy
-curl http://localhost:9000/health/live
+Common causes:
 
-# Check credentials in environment
-echo $AWS_ACCESS_KEY_ID
-echo $AWS_SECRET_ACCESS_KEY
-```
+- **ImagePullBackOff**: the image tag must match the Knative service name
+  (hyphens, not underscores) and be pushed to the registry the cluster can reach.
+- **Revision not ready**: check `/health/ready`; it reports dependency failures.
 
-### Knative Service Not Ready
-```bash
-# Check service status
-kubectl get ksvc marrakesh
+- **UnknownIssuer on PostgreSQL**: the PgBouncer pooler service name must be in
+  the Cluster's `spec.certificates.serverAltDNSNames`.
 
-# View service details
-kubectl describe ksvc marrakesh
 
-# Check pods
-kubectl get pods -l serving.knative.dev/service=marrakesh
-
-# View logs
-kubectl logs -f deployment/<deployment-name>
-```
-
-### S3 Integration Tests Fail
-```bash
-# Ensure RustFS is running and healthy
-docker-compose logs rustfs
-
-# Check test output
-cargo test --test '*' -- --nocapture --test-threads=1
-```
-
-## Performance Tuning
-
-### Redis Connection Pool
-Edit `src/main.rs`:
-```rust
-let manager = redis::aio::MultiplexedConnection::new(client);
-```
-
-### S3 Operator Configuration
-Edit `src/main.rs` S3 initialization to add:
-```rust
-let builder = http_backend::HttpBuilder::default()
-    .client(client)
-    .root(&bucket);
-```
-
-### Knative Auto-scaling
-Edit `deploy/base/helmrelease.yaml` (per-environment values live in the overlay patches):
-```yaml
-scaling:
-  minScale: 1
-  maxScale: 10
-  targetUtilizationPercentage: 70
-```
-
-## Security
-
-### Secret Management
-- Use Kubernetes Secrets for sensitive data
-- S3 credentials stored in encrypted Secret
-- No hardcoded secrets in config files
-- Credentials rotated via GitOps
-
-### Container Security
-- Non-root user in Dockerfile
-- Read-only root filesystem
-- Security context in Knative manifests
-- Network policies via Istio/Cilium
-
-### Code Security
-- Dependencies: Regular `cargo audit`
-- SAST: Integrated in CI with clippy
-- Container scanning: Use your registry's scanner
-- Supply chain: Signed commits recommended
+See `docs/TROUBLESHOOTING.md` and `docs/FAQ.md`.
 
 ## Contributing
 
-See the root TEMPLATE.md for:
-- How to extend the template
-- Adding new configuration options
-- Customizing for your team
+See [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md) for the development
+workflow, commit conventions, and the pull-request checklist.
 
 ## License
 
-MIT License - See LICENSE file
-
-## Support
-
-For issues or questions:
-1. Check [STORAGE.md](./STORAGE.md) for S3-specific issues
-2. Review [GETTING_STARTED.md](./GETTING_STARTED.md) for setup help
-3. Check [TEMPLATE.md](./TEMPLATE.md) for template structure
-4. Review service logs: `kubectl logs -f svc/marrakesh`
-
-
+MIT License - see the [LICENSE](./LICENSE) file.

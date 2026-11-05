@@ -156,6 +156,8 @@ spec:
       name: default
 ```
 
+
+
 ## Advanced: Custom Event Types
 
 ### Define Your Event Type

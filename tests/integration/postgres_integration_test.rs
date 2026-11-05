@@ -24,8 +24,8 @@
 //! cargo test --test postgres_integration_test
 //! ```
 
-use sqlx::postgres::{PgPool, PgPoolOptions, PgQueryResult};
-use sqlx::{Row, Error as SqlxError};
+use sqlx::postgres::{PgPool, PgPoolOptions};
+use sqlx::{Error as SqlxError, Row};
 use std::env;
 use std::time::Duration;
 
@@ -48,11 +48,7 @@ impl TestDb {
         let mut base_delay_ms = 100;
 
         loop {
-            match PgPoolOptions::new()
-                .max_connections(5)
-                .connect(&url)
-                .await
-            {
+            match PgPoolOptions::new().max_connections(5).connect(&url).await {
                 Ok(pool) => {
                     eprintln!("✓ Connected to PostgreSQL");
                     return Ok(TestDb { pool });
@@ -100,9 +96,11 @@ impl TestDb {
             .execute(&self.pool)
             .await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_test_records_created ON test_records(created_at)")
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_test_records_created ON test_records(created_at)",
+        )
+        .execute(&self.pool)
+        .await?;
 
         eprintln!("✓ Test schema created");
         Ok(())
@@ -135,8 +133,9 @@ fn build_connection_string() -> Result<String, Box<dyn std::error::Error>> {
     }
 
     // Fall back to individual parameters
-    let host = env::var("POSTGRES_HOST")
-        .unwrap_or_else(|_| "postgres-test-postgres-rw.postgres-test.svc.cluster.local".to_string());
+    let host = env::var("POSTGRES_HOST").unwrap_or_else(|_| {
+        "postgres-test-postgres-rw.postgres-test.svc.cluster.local".to_string()
+    });
     let port = env::var("POSTGRES_PORT").unwrap_or_else(|_| "5432".to_string());
     let user = env::var("POSTGRES_USER").unwrap_or_else(|_| "app".to_string());
     let password = env::var("POSTGRES_PASSWORD")?;
@@ -151,8 +150,11 @@ fn build_connection_string() -> Result<String, Box<dyn std::error::Error>> {
 // ============================================================================
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_insert_basic_record() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert a basic record
@@ -180,8 +182,11 @@ async fn test_insert_basic_record() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_insert_with_json_metadata() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert record with JSONB metadata
@@ -218,8 +223,11 @@ async fn test_insert_with_json_metadata() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_insert_multiple_records() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert multiple records in a transaction
@@ -234,10 +242,10 @@ async fn test_insert_multiple_records() {
         )
         .bind(format!("record_{}", i))
         .bind(format!("Description for record {}", i))
-        .bind(i as i32)
+        .bind(i)
         .execute(&mut *tx)
         .await
-        .expect(&format!("Failed to insert record {}", i));
+        .unwrap_or_else(|e| panic!("Failed to insert record {}: {}", i, e));
     }
 
     tx.commit().await.expect("Failed to commit transaction");
@@ -256,8 +264,11 @@ async fn test_insert_multiple_records() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_select_by_id() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert a record
@@ -303,8 +314,11 @@ async fn test_select_by_id() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_select_with_filtering() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert multiple records with different count values
@@ -320,7 +334,7 @@ async fn test_select_with_filtering() {
         .bind(i % 2 == 0) // alternate active/inactive
         .execute(&db.pool)
         .await
-        .expect(&format!("Failed to insert record {}", i));
+        .unwrap_or_else(|e| panic!("Failed to insert record {}: {}", i, e));
     }
 
     // Select active records with count > 15
@@ -350,8 +364,11 @@ async fn test_select_with_filtering() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_select_range_query() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert records with timestamps
@@ -363,17 +380,19 @@ async fn test_select_range_query() {
             "#,
         )
         .bind(format!("range_record_{}", i))
-        .bind(i as i32)
+        .bind(i)
         .execute(&db.pool)
         .await
-        .expect(&format!("Failed to insert record {}", i));
+        .unwrap_or_else(|e| panic!("Failed to insert record {}: {}", i, e));
     }
 
     // Select records created in the last hour
-    let rows = sqlx::query("SELECT id, name FROM test_records WHERE created_at > NOW() - INTERVAL '1 hour'")
-        .fetch_all(&db.pool)
-        .await
-        .expect("Failed to fetch records by timestamp range");
+    let rows = sqlx::query(
+        "SELECT id, name FROM test_records WHERE created_at > NOW() - INTERVAL '1 hour'",
+    )
+    .fetch_all(&db.pool)
+    .await
+    .expect("Failed to fetch records by timestamp range");
 
     assert_eq!(rows.len(), 5, "Expected 5 recent records");
     eprintln!("✓ Range query returned {} records", rows.len());
@@ -383,8 +402,11 @@ async fn test_select_range_query() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_update_single_field() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert a record
@@ -431,8 +453,11 @@ async fn test_update_single_field() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_update_multiple_fields() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert a record
@@ -466,13 +491,11 @@ async fn test_update_multiple_fields() {
     .expect("Failed to update record");
 
     // Verify all updates
-    let row = sqlx::query(
-        "SELECT description, is_active, count FROM test_records WHERE id = $1"
-    )
-    .bind(id)
-    .fetch_one(&db.pool)
-    .await
-    .expect("Failed to fetch updated record");
+    let row = sqlx::query("SELECT description, is_active, count FROM test_records WHERE id = $1")
+        .bind(id)
+        .fetch_one(&db.pool)
+        .await
+        .expect("Failed to fetch updated record");
 
     let description: String = row.get("description");
     let is_active: bool = row.get("is_active");
@@ -488,8 +511,11 @@ async fn test_update_multiple_fields() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_update_with_json() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     let initial_metadata = serde_json::json!({
@@ -549,8 +575,11 @@ async fn test_update_with_json() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_delete_single_record() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert a record
@@ -591,8 +620,11 @@ async fn test_delete_single_record() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_delete_multiple_records() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert multiple records
@@ -604,11 +636,11 @@ async fn test_delete_multiple_records() {
             "#,
         )
         .bind(format!("delete_record_{}", i))
-        .bind(i as i32)
+        .bind(i)
         .bind(i % 2 == 0)
         .execute(&db.pool)
         .await
-        .expect(&format!("Failed to insert record {}", i));
+        .unwrap_or_else(|e| panic!("Failed to insert record {}: {}", i, e));
     }
 
     // Delete inactive records
@@ -617,7 +649,11 @@ async fn test_delete_multiple_records() {
         .await
         .expect("Failed to delete inactive records");
 
-    assert_eq!(delete_result.rows_affected(), 2, "Expected to delete 2 inactive records");
+    assert_eq!(
+        delete_result.rows_affected(),
+        2,
+        "Expected to delete 2 inactive records"
+    );
 
     // Verify deletion
     let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM test_records")
@@ -646,13 +682,19 @@ async fn test_connection_error_handling() {
         .connect(invalid_url)
         .await;
 
-    assert!(result.is_err(), "Expected connection to fail with invalid credentials");
+    assert!(
+        result.is_err(),
+        "Expected connection to fail with invalid credentials"
+    );
     eprintln!("✓ Connection error handled gracefully");
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_constraint_violation() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     // Insert a record
@@ -684,8 +726,11 @@ async fn test_constraint_violation() {
 }
 
 #[tokio::test]
+#[ignore = "requires live PostgreSQL (POSTGRES_URL)"]
 async fn test_transaction_rollback_on_error() {
-    let db = TestDb::connect().await.expect("Failed to connect to database");
+    let db = TestDb::connect()
+        .await
+        .expect("Failed to connect to database");
     db.setup_schema().await.expect("Failed to setup schema");
 
     let mut tx = db.pool.begin().await.expect("Failed to start transaction");

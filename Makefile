@@ -2,7 +2,11 @@
 
 # Configuration
 CLUSTER_NAME := dev
+# Kubeconfig for the local Kind cluster created by `make local-up`.
 KUBECONFIG_PATH := .kubeconfig-dev
+# Kubeconfig for the Flux bootstrap/deploy targets (a real cluster).
+# Override per invocation: make deploy dev KUBECONFIG=... (or CLUSTER_KUBECONFIG=...)
+CLUSTER_KUBECONFIG ?= $(HOME)/.kube/config
 REGISTRY_PORT := 5001
 # Service name (normalized with hyphens for Kubernetes)
 PROJECT_NAME := marrakesh
@@ -29,8 +33,8 @@ help: ## Show this help message
 # Primary Developer Commands
 # ============================================================================
 
-.PHONY: dev-up
-dev-up: ## Start full development environment (cluster + all services)
+.PHONY: local-up
+local-up: ## Start full local development environment (Kind + all services)
 	@echo "${BLUE}╔════════════════════════════════════════════════════════╗${NC}"
 	@echo "${BLUE}║      Starting Development Environment (Kind)           ║${NC}"
 	@echo "${BLUE}╚════════════════════════════════════════════════════════╝${NC}"
@@ -48,7 +52,7 @@ dev-up: ## Start full development environment (cluster + all services)
 	@./scripts/dev/deploy-observability.sh || { echo "${RED}✗ Failed to deploy observability${NC}"; exit 1; }
 	@echo ""
 	@echo "${YELLOW}[5/6]${NC} Waiting for CNPG operator and deploying PostgreSQL..."
-	@./scripts/dev/deploy-postgres.sh || { echo "${RED}✗ Failed to deploy PostgreSQL${NC}"; exit 1; }
+	@./scripts/dev/deploy-postgres.sh dev --kustomize deploy/dev/app-overlay || { echo "${RED}✗ Failed to deploy PostgreSQL${NC}"; exit 1; }
 	@echo ""
 	@echo "${YELLOW}[6/6]${NC} Building and deploying application..."
 	@./scripts/dev/build-and-deploy.sh || { echo "${RED}✗ Failed to deploy application${NC}"; exit 1; }
@@ -81,10 +85,13 @@ dev-up: ## Start full development environment (cluster + all services)
 	@echo "     ${GREEN}make dev-restart${NC}"
 	@echo ""
 	@echo "  5. Tear down when done:"
-	@echo "     ${GREEN}make dev-down${NC}"
+	@echo "     ${GREEN}make local-down${NC}"
 
-.PHONY: dev-down
-dev-down: ## Stop and delete development environment
+.PHONY: dev-up
+dev-up: local-up ## [deprecated] Alias for local-up
+
+.PHONY: local-down
+local-down: ## Stop and delete the local development environment
 	@echo "${YELLOW}Stopping development environment...${NC}"
 	@kind delete cluster --name $(CLUSTER_NAME) 2>/dev/null || true
 	@docker stop kind-registry-dev 2>/dev/null || true
@@ -92,6 +99,9 @@ dev-down: ## Stop and delete development environment
 	@pkill -f "kubectl.*port-forward" 2>/dev/null || true
 	@rm -f $(KUBECONFIG_PATH)
 	@echo "${GREEN}✓ Dev environment cleaned up${NC}"
+
+.PHONY: dev-down
+dev-down: local-down ## [deprecated] Alias for local-down
 
 .PHONY: dev-restart
 dev-restart: ## Rebuild and redeploy application (with docker image rebuild)
@@ -235,7 +245,7 @@ dev-postgres: ## Deploy PostgreSQL cluster (requires feature_postgres)
 	@if [ ! -f scripts/dev/deploy-postgres.sh ]; then \
 		echo "${RED}PostgreSQL feature is not enabled in this project${NC}"; exit 1; \
 	fi
-	@./scripts/dev/deploy-postgres.sh
+	@./scripts/dev/deploy-postgres.sh dev --kustomize deploy/dev/app-overlay
 
 .PHONY: dev-postgres-status
 dev-postgres-status: ## Show CNPG Cluster status and ready instances
@@ -265,10 +275,10 @@ validate-postgres: ## Validate PostgreSQL manifests (requires feature_postgres)
 # ============================================================================
 
 .PHONY: dev-clean
-dev-clean: dev-down ## Clean everything (alias for dev-down)
+dev-clean: local-down ## Clean everything (alias for local-down)
 
 .PHONY: dev-reset
-dev-reset: dev-down dev-up ## Nuclear option - delete and recreate everything
+dev-reset: local-down local-up ## Nuclear option - delete and recreate everything
 
 .PHONY: dev-kubeconfig
 dev-kubeconfig: ## Show kubeconfig export command
@@ -281,16 +291,17 @@ dev-get-url: ## Get the application URL
 		echo "${RED}Application not found${NC}"
 
 # ============================================================================
-# FluxCD Bootstrap Commands
+# FluxCD Bootstrap & Deploy Commands
 # ============================================================================
 
 # Valid overlay environments (derived from deploy/overlays/ subdirectories)
 VALID_ENVS := $(notdir $(wildcard deploy/overlays/*))
 
+# Bootstrap renders each Flux config with `kustomize build --load-restrictor=LoadRestrictionsNone` (kubectl apply -k cannot set the restrictor) because every config dir references `../../kustomization-<env>.yaml` outside its own root, which kustomize's default LoadRestrictionsRootOnly rejects.
 .PHONY: bootstrap
 bootstrap: ## Bootstrap Flux resources (usage: make bootstrap [environment])
 	@ENV="$(word 2,$(MAKECMDGOALS))"; \
-	export KUBECONFIG=$(KUBECONFIG_PATH); \
+	export KUBECONFIG="$${KUBECONFIG:-$(CLUSTER_KUBECONFIG)}"; \
 	if [ -z "$$ENV" ]; then \
 		echo "${BLUE}Applying Flux GitRepository...${NC}"; \
 		kubectl apply --server-side -f deploy/flux/git-repository.yaml || { echo "${RED}✗ Failed to apply GitRepository${NC}"; exit 1; }; \
@@ -315,14 +326,50 @@ bootstrap: ## Bootstrap Flux resources (usage: make bootstrap [environment])
 		kubectl apply --server-side -f deploy/flux/git-repository.yaml || { echo "${RED}✗ Failed to apply GitRepository${NC}"; exit 1; }; \
 		echo ""; \
 		echo "${YELLOW}[2/2]${NC} Applying Flux Kustomizations from $$CONFIG ..."; \
-		kubectl apply --server-side -k "$$CONFIG" || { echo "${RED}✗ Failed to apply $$CONFIG${NC}"; exit 1; }; \
+		kustomize build --load-restrictor=LoadRestrictionsNone "$$CONFIG" > /tmp/flux-config-render.yaml && kubectl apply --server-side -f /tmp/flux-config-render.yaml || { echo "${RED}✗ Failed to apply $$CONFIG${NC}"; exit 1; }; \
 		echo ""; \
 		echo "${GREEN}✓ Flux bootstrap complete for $${RESOLVED}${NC}"; \
 		echo "  Flux will now reconcile deploy/overlays/$${RESOLVED}/"; \
 	fi
 
-# No-op targets for bootstrap environment arguments
-# These prevent Make from erroring on "make bootstrap production" etc.
+.PHONY: git-auth
+git-auth: ## Create the Flux SSH deploy-key Secret for private repositories
+	@./scripts/bootstrap-git-auth.sh
+
+# deploy moves the working tree to git and lets Flux take over: it commits,
+# pushes, then applies the GitRepository + Kustomizations for the environment
+# (the same apply as `make bootstrap <env>`; a no-op after the first run).
+.PHONY: deploy
+deploy: ## Commit + push, then (re)apply Flux for an environment (usage: make deploy <env>)
+	@ENV="$(word 2,$(MAKECMDGOALS))"; \
+	if [ -z "$$ENV" ]; then \
+		echo "${RED}✗ Usage: make deploy <environment>  (one of: $(VALID_ENVS))${NC}"; \
+		exit 1; \
+	fi; \
+	RESOLVED=$$(echo "$$ENV" | sed 's/^production$$/prod/' | sed 's/^development$$/dev/'); \
+	if [ ! -d "deploy/flux/config/$$RESOLVED" ]; then \
+		echo "${RED}✗ Unknown environment: $$ENV${NC}"; \
+		echo "  Available: $(VALID_ENVS) (also: production, development)"; \
+		exit 1; \
+	fi; \
+	echo "${BLUE}Committing working tree ($$RESOLVED)...${NC}"; \
+	git add -A; \
+	if git diff --cached --quiet; then \
+		echo "${GREEN}✓ Nothing to commit${NC}"; \
+	else \
+		git commit -m "chore(deploy): sync working tree for $${RESOLVED}" || { echo "${RED}✗ git commit failed (is user.name/user.email configured?)${NC}"; exit 1; }; \
+		echo "${GREEN}✓ Committed${NC}"; \
+	fi; \
+	if git remote get-url origin >/dev/null 2>&1; then \
+		git push || { echo "${RED}✗ git push failed${NC}"; exit 1; }; \
+		echo "${GREEN}✓ Pushed${NC}"; \
+	else \
+		echo "${YELLOW}⚠ No 'origin' remote — skipping push; Flux only sees committed AND pushed changes.${NC}"; \
+	fi; \
+	$(MAKE) bootstrap "$$RESOLVED"
+
+# No-op targets for bootstrap/deploy environment arguments
+# These prevent Make from erroring on "make deploy production" etc.
 .PHONY: dev staging prod production development
 dev staging prod production development:
 	@:

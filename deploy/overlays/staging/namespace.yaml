@@ -1,0 +1,10 @@
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: marrakesh
+  labels:
+    # Keeps the namespace (and anything a cluster policy generated inside it)
+    # alive if this Kustomization is ever removed.
+    kustomize.toolkit.fluxcd.io/prune: disabled
+

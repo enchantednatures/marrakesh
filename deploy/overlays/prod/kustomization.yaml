@@ -1,10 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: production
+namespace: marrakesh
 
 resources:
   - ../../base
+  
+  - namespace.yaml
+  
 
 components:
   
@@ -18,8 +21,6 @@ patches:
   - target:
       kind: HelmRelease
       name: marrakesh
-    # JSON6902 via RFC 6901 double-slash encoding — see deploy/overlays/dev for
-    # the issue #136 strategic-merge rationale.
     patch: |-
       - op: replace
         path: /spec/values/services/app/scaling
@@ -35,6 +36,31 @@ patches:
           limits:
             cpu: "1000m"
             memory: "512Mi"
+
+      
+      # Chart-provisioned ObjectBucketClaims (ksvc 1.0.0 `objectBuckets`). The
+      # cluster bucket provisioner creates the bucket plus a claim-named Secret
+      # (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY) and ConfigMap
+      # (BUCKET_HOST/BUCKET_PORT/BUCKET_NAME) in the release namespace.
+      - op: add
+        path: /spec/values/objectBuckets
+        value:
+          
+          postgres-backups:
+            storageClassName: "ceph-bucket"
+            endpointURL: "https://rook-ceph-rgw-ceph-objectstore.rook-ceph.svc:443"
+            bucketName: "marrakesh-postgres-backups-prod"
+          
+          
+          app-data:
+            storageClassName: "ceph-bucket"
+            bucketName: "marrakesh-app-data-prod"
+            
+          
+      
+
+      
+      
       - op: replace
         path: /spec/values/kafka/sources/events/consumers
         value: 10
@@ -59,6 +85,8 @@ patches:
         path: /spec/instances
         value: 3
   # Per-env backup retention (ObjectStore base carries the prod default).
+  # The base carries the dev/Kind RustFS endpoint; prod routes backups to the
+  # Ceph RGW bucket provisioned by the chart (see the objectBuckets patch).
   - target:
       kind: ObjectStore
       name: "marrakesh-postgres-backup-store"
@@ -66,6 +94,12 @@ patches:
       - op: replace
         path: /spec/retentionPolicy
         value: "30d"
+      - op: replace
+        path: /spec/configuration/endpointURL
+        value: "https://rook-ceph-rgw-ceph-objectstore.rook-ceph.svc:443"
+      - op: replace
+        path: /spec/configuration/destinationPath
+        value: "s3://marrakesh-postgres-backups-prod/"
   
   
   # PgBouncer pooler instance count (see deploy/components/postgres/pooler).
@@ -88,15 +122,5 @@ patches:
     patch: |-
       - op: replace
         path: /spec/provider/address
-        value: "http://prometheus.observability.svc.cluster.local:9090"
+        value: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
   
-
- 
-configMapGenerator:
-  - name: s3-config
-    behavior: create
-    literals:
-      - S3_ENDPOINT=https://s3.amazonaws.com
-      - S3_BUCKET=data-prod
-      - S3_REGION=us-east-1
- 

@@ -2,7 +2,7 @@ apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: marrakesh
-  namespace: default
+  namespace: marrakesh
 spec:
   interval: 10m
   chart:
@@ -13,26 +13,44 @@ spec:
         name: marrakesh
         namespace: flux-system
       reconcileStrategy: Revision
+  
+  # Knative >=1.23 rejects valueFrom.fieldRef env vars; the ksvc chart's DLQ
+  # service hardcodes POD_NAME/POD_NAMESPACE via fieldRef. Strip the env list
+  # post-render — the event_display image does not need them.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Service
+              name: "marrakesh-events-dlq"
+            patch: |-
+              - op: replace
+                path: /spec/template/spec/containers/0/env
+                value: []
+  
   values:
     global:
       fullnameOverride: "marrakesh"
       labels:
         app.kubernetes.io/part-of: "marrakesh"
 
-    # Named service key with an empty nameOverride so the Knative Service is
-    # named exactly fullnameOverride ("marrakesh"). A non-empty key is required
-    # because kafka.sources.*.sink must reference a services key and the chart
-    # rejects an empty sink value.
+    # Named the services key `app` (non-empty) because kafka.sources.*.sink must
+    # reference a services key and the ksvc chart rejects an empty sink. An empty
+    # nameOverride makes the Knative Service name exactly fullnameOverride.
     services:
       app:
         nameOverride: ""
         image:
           repository: "ghcr.io/enchantednatures/marrakesh"
-          tag: "latest" # {"$imagepolicy": "flux-system:marrakesh:tag"}
+          tag: "latest"  # {"$imagepolicy": "flux-system:marrakesh:tag"}
+          
+          # Private registry credentials (see deploy/overlays/dev for the
+          # SOPS-encrypted Secret and `make` targets).
           imagePullSecrets:
             - name: ghcr-pull-secret
+          
         scaling:
-          minScale: 0
+          minScale: 1
           maxScale: 10
           target: 100
           containerConcurrency: 100
@@ -79,29 +97,49 @@ spec:
               secretKeyRef:
                 name: "marrakesh-secrets"
                 key: redis-url
-
+          
+          # Object storage is backed by the chart-created ObjectBucketClaim
+          # "<project>-app-data". The cluster's bucket provisioner publishes:
+          #   - Secret   "<project>-app-data" -> AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+          #   - ConfigMap "<project>-app-data" -> BUCKET_HOST / BUCKET_PORT / BUCKET_NAME
+          # both in the release namespace.
           - name: AWS_ACCESS_KEY_ID
             valueFrom:
               secretKeyRef:
-                name: "marrakesh-secrets"
-                key: aws-access-key-id
+                name: "marrakesh-app-data"
+                key: AWS_ACCESS_KEY_ID
           - name: AWS_SECRET_ACCESS_KEY
             valueFrom:
               secretKeyRef:
-                name: "marrakesh-secrets"
-                key: aws-secret-access-key
+                name: "marrakesh-app-data"
+                key: AWS_SECRET_ACCESS_KEY
+          # BUCKET_HOST/BUCKET_PORT must be declared BEFORE APP__S3__ENDPOINT:
+          # Kubernetes expands $(VAR) references using earlier env entries only.
+          - name: BUCKET_HOST
+            valueFrom:
+              configMapKeyRef:
+                name: "marrakesh-app-data"
+                key: BUCKET_HOST
+          - name: BUCKET_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: "marrakesh-app-data"
+                key: BUCKET_PORT
           - name: APP__S3__ENDPOINT
-            value: "http://rustfs:9000"
+            value: "http://$(BUCKET_HOST):$(BUCKET_PORT)"
           - name: APP__S3__BUCKET
-            value: "data"
+            valueFrom:
+              configMapKeyRef:
+                name: "marrakesh-app-data"
+                key: BUCKET_NAME
           - name: APP__S3__REGION
             value: "us-east-1"
-
+          
           - name: APP__TELEMETRY__OTLP_ENDPOINT
             value: "http://otel-collector.observability.svc.cluster.local:4317"
           - name: APP__TELEMETRY__SERVICE_NAME
             value: "marrakesh"
-
+          
           # App DSN (postgresql://...) from the operator-generated
           # <cluster>-app secret; consumed as APP__POSTGRES__URL.
           - name: APP__POSTGRES__URL
@@ -109,7 +147,7 @@ spec:
               secretKeyRef:
                 name: "marrakesh-postgres-app"
                 key: uri
-
+          
           # Route the sqlx pool through the PgBouncer Pooler service. The
           # CNPG `uri` secret always points at <cluster>-rw, so the override
           # swaps the host while keeping credentials from that same secret.
@@ -117,10 +155,15 @@ spec:
           # spec.certificates.serverAltDNSNames for verify-full to pass.
           - name: APP__POSTGRES__HOST
             value: "marrakesh-postgres-rw-pooler"
-
+          
+          
+          # Chart-managed Kafka: Redpanda exposes a same-namespace Service
+          # named "<project>-kafka" on 9093; Strimzi exposes the bootstrap
+          # Service "<project>-kafka-kafka-bootstrap" on the plaintext 9092.
           - name: APP__KAFKA__BROKER_URL
             value: "marrakesh-kafka:9093"
-
+          
+        
         # PostgreSQL server CA certificate. Generated and rotated automatically
         # by the CloudNativePG operator (secret <cluster>-ca, key ca.crt);
         # mounted at the path config/*.toml expects (ssl_root_cert_path).
@@ -135,15 +178,25 @@ spec:
               items:
                 - key: ca.crt
                   path: ca.crt
+        
 
+    
     kafka:
+      
+      # Managed mode renders a Strimzi or Redpanda cluster plus a Knative Kafka
+      # Broker and Trigger. The chart derives the Kafka bootstrap address from
+      # the cluster name/namespace, so neither the sources nor the broker config
+      # may set `bootstrapServers`; with the Broker enabled the KafkaSource sinks
+      # to the Broker (a Trigger routes to services.app), so `sink` must not be
+      # set.
       cluster:
         enabled: true
-        provider: redpanda
+        provider: "redpanda"
         name: "marrakesh-kafka"
         replicas: 1
         storage:
           size: "10Gi"
+          # Empty falls back to the cluster's default StorageClass.
           storageClassName: "ceph-block"
         resources:
           requests:
@@ -159,11 +212,13 @@ spec:
         topics:
           create: true
           partitions: 3
+        
         redpanda:
+          # Kyverno clusters commonly reject the operator's privileged tuning
+          # init container and pods without regular-container resources. Disable
+          # tuning and size every generated container explicitly. See
+          # deploy/kyverno/policyexception.yaml for the matching exception.
           extraClusterSpec:
-            # Kyverno in marrakesh rejects the chart's privileged tuning init
-            # container and pods without regular-container resources. Remove
-            # tuning and size the configurator, sidecar, and jobs explicitly.
             resources:
               requests:
                 cpu: "500m"
@@ -224,6 +279,7 @@ spec:
                   memory: "64Mi"
                 limits:
                   memory: "128Mi"
+        
       broker:
         enabled: true
         config:
@@ -239,12 +295,16 @@ spec:
             retry: 5
             backoffPolicy: exponential
             backoffDelay: "PT1S"
+        
+      
       sources:
         events:
           topic: "events"
           consumerGroup: "marrakesh-consumers"
+          
           consumers: 3
           initialOffset: latest
+          
           delivery:
             retry: 5
             backoffPolicy: exponential
@@ -264,3 +324,7 @@ spec:
               limits:
                 cpu: "200m"
                 memory: "128Mi"
+        
+    
+
+    

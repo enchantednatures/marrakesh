@@ -51,7 +51,7 @@ cargo --version
 
 ```bash
 # Start all services (Kind cluster with Knative, Redis, RustFS, Jaeger, Prometheus, OTEL Collector)
-make dev-up
+make local-up
 
 # Verify services are running
 make dev-status
@@ -60,7 +60,7 @@ make dev-status
 make dev-logs
 
 # Stop services
-make dev-down
+make local-down
 
 # Stop and clean everything
 make dev-clean
@@ -171,7 +171,7 @@ marrakesh/
 git checkout -b feature/my-feature
 
 # 2. Start local development environment
-make dev-up
+make local-up
 
 # 3. Run with auto-reload (in another terminal)
 cargo watch -q -c -w src -x run
@@ -201,7 +201,7 @@ git push origin feature/my-feature
 
 ```bash
 # Start development environment
-make dev-up
+make local-up
 
 # Wait for services to be ready
 make dev-status
@@ -213,7 +213,7 @@ cargo test -- --ignored --nocapture
 make dev-logs
 
 # Clean up
-make dev-down
+make local-down
 ```
 
 ---
@@ -331,7 +331,7 @@ pub async fn copy_object(
 #[tokio::test]
 #[ignore]
 async fn test_copy_object() {
-    // Setup: Start docker-compose
+    // Setup: make local-up (Kind + RustFS)
     // Test copy operation
     // Verify source and destination exist
 }

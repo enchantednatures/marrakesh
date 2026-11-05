@@ -154,10 +154,10 @@ brew install trivy  # macOS
 apt install trivy   # Ubuntu
 
 # Scan image
-trivy image ghcr.io/test-org/marrakesh:latest
+trivy image ghcr.io/enchantednatures/marrakesh:latest
 
 # Scan with severity filter
-trivy image --severity HIGH,CRITICAL ghcr.io/test-org/marrakesh:latest
+trivy image --severity HIGH,CRITICAL ghcr.io/enchantednatures/marrakesh:latest
 ```
 
 **Grype**:
@@ -166,10 +166,10 @@ trivy image --severity HIGH,CRITICAL ghcr.io/test-org/marrakesh:latest
 brew install grype  # macOS
 
 # Scan image
-grype ghcr.io/test-org/marrakesh:latest
+grype ghcr.io/enchantednatures/marrakesh:latest
 ```
 
-**CI Integration** (`.github/workflows/security-scan.yaml`):
+**CI Integration** (`.github/workflows/ci.yaml`):
 ```yaml
 name: Security Scan
 
@@ -185,7 +185,7 @@ jobs:
       run: docker build -t test-image .
     
     - name: Run Trivy
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@v0.36.0
       with:
         image-ref: test-image
         format: 'sarif'
@@ -206,10 +206,10 @@ jobs:
 go install github.com/sigstore/cosign/cmd/cosign@latest
 
 # Sign image
-cosign sign --key cosign.key ghcr.io/test-org/marrakesh:v1.0.0
+cosign sign --key cosign.key ghcr.io/enchantednatures/marrakesh:v1.0.0
 
 # Verify signature
-cosign verify --key cosign.pub ghcr.io/test-org/marrakesh:v1.0.0
+cosign verify --key cosign.pub ghcr.io/enchantednatures/marrakesh:v1.0.0
 
 # Verify in Kubernetes (Admission Controller)
 # Kyverno Policy to enforce signature verification

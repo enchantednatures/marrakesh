@@ -1,10 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: staging
+namespace: marrakesh
 
 resources:
   - ../../base
+  
+  - namespace.yaml
+  
 
 components:
   
@@ -18,8 +21,6 @@ patches:
   - target:
       kind: HelmRelease
       name: marrakesh
-    # JSON6902 via RFC 6901 double-slash encoding — see deploy/overlays/dev for
-    # the issue #136 strategic-merge rationale.
     patch: |-
       - op: replace
         path: /spec/values/services/app/scaling
@@ -35,6 +36,9 @@ patches:
           limits:
             cpu: "800m"
             memory: "384Mi"
+
+      
+      
       - op: replace
         path: /spec/values/kafka/sources/events/consumers
         value: 5
@@ -42,6 +46,30 @@ patches:
         path: /spec/values/kafka/sources/events/initialOffset
         value: earliest
       
+
+  
+  # Object buckets provisioned per environment by the chart (ObjectBucketClaim).
+  # Names are immutable once a claim first binds; keep them environment-unique.
+  - target:
+      kind: HelmRelease
+      name: marrakesh
+    patch: |-
+      - op: add
+        path: /spec/values/objectBuckets
+        value:
+          
+          postgres-backups:
+            storageClassName: "ceph-bucket"
+            endpointURL: "https://rook-ceph-rgw-ceph-objectstore.rook-ceph.svc:443"
+            bucketName: "marrakesh-postgres-backups-staging"
+          
+          
+          app-data:
+            storageClassName: "ceph-bucket"
+            bucketName: "marrakesh-app-data-staging"
+            
+          
+  
 
   
   # Per-env CloudNativePG sizing (component base carries prod-leaning defaults).
@@ -60,6 +88,18 @@ patches:
       - op: replace
         path: /spec/retentionPolicy
         value: "14d"
+  # Point backups at THIS environment's Ceph RGW bucket (base carries the
+  # dev/Kind RustFS endpoint and the un-suffixed destination path).
+  - target:
+      kind: ObjectStore
+      name: "marrakesh-postgres-backup-store"
+    patch: |-
+      - op: replace
+        path: /spec/configuration/endpointURL
+        value: "https://rook-ceph-rgw-ceph-objectstore.rook-ceph.svc:443"
+      - op: replace
+        path: /spec/configuration/destinationPath
+        value: "s3://marrakesh-postgres-backups-staging/"
   
   
   # PgBouncer pooler instance count (see deploy/components/postgres/pooler).
@@ -82,15 +122,5 @@ patches:
     patch: |-
       - op: replace
         path: /spec/provider/address
-        value: "http://prometheus.observability.svc.cluster.local:9090"
+        value: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
   
-
- 
-configMapGenerator:
-  - name: s3-config
-    behavior: create
-    literals:
-      - S3_ENDPOINT=https://rustfs.staging.svc.cluster.local:9000
-      - S3_BUCKET=data-staging
-      - S3_REGION=us-east-1
- 
