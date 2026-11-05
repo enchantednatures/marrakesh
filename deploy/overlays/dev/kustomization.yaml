@@ -29,6 +29,16 @@ patches:
     # strategic merge would name-merge it with the base entries), and the
     # same style is kept for the rest of the values.
     patch: |-
+      # Cold-start allowance: the chart waits for the Redpanda cluster, Topic,
+      # Broker, KafkaSource and Trigger in addition to the Knative Service.
+      - op: add
+        path: /spec/install
+        value:
+          timeout: 10m
+      - op: add
+        path: /spec/upgrade
+        value:
+          timeout: 10m
       - op: replace
         path: /spec/values/services/app/image
         value:
