@@ -16,6 +16,9 @@ resources:
   # claim is part of the manifest too.
   - domain-mapping.yaml
   - ghcr-pull-secret.sops.yaml
+  # Redpanda Console for the app's managed Kafka (marrakesh-kafka:9093).
+  - console.yaml
+  - console-virtualservice.yaml
 
 components:
   - ../../components/postgres

@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: console
+  namespace: marrakesh
+spec:
+  hosts:
+    - marrakesh-console.enchantednatures.com
+  gateways:
+    - istio-ingress/external-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: console.marrakesh.svc.cluster.local
+            port:
+              number: 8080
