@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `replace` and the Kind app overlay clears `objectBuckets` with `add {}`.
 - Added `template-values.toml` to record the generation values, and pinned
   `scripts/service-template.env` `TEMPLATE_REF` to the synced template commit.
+- Added `make ci-secrets` / `make ci-secrets-check` and a `make deploy`
+  preflight (via `scripts/bootstrap-ci-secrets.sh`) to set/verify the
+  `KELLNR_TOKEN` Actions secret from the local Cargo/Kellnr token.
 - Preserved the home-cluster overrides: external RustFS and Tempo, Dragonfly,
   cluster-wide Flagger/CNPG/ARC wiring, the `kube-prometheus-stack` metric
   gates, the pinned app image tag, and the ARC runner sizing.
