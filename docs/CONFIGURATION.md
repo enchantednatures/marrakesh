@@ -256,6 +256,7 @@ kubectl create secret generic marrakesh-secrets \
 
 Then inject into Pod via environment variables:
 
+
 ```yaml
 apiVersion: serving.knative.dev/v1
 kind: Service
@@ -265,28 +266,29 @@ spec:
   template:
     spec:
       containers:
-       - image: ghcr.io/enchantednatures/marrakesh:latest
-        env:
-        - name: APP__SERVER__PORT
-          value: "8080"
-        - name: APP__REDIS__URL
-          valueFrom:
-            secretKeyRef:
-              name: marrakesh-secrets
-              key: redis-url
-        
-        - name: AWS_ACCESS_KEY_ID
-          valueFrom:
-            secretKeyRef:
-              name: marrakesh-secrets
-              key: aws-access-key-id
-        - name: AWS_SECRET_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: marrakesh-secrets
-              key: aws-secret-access-key
-        
+        - image: ghcr.io/enchantednatures/marrakesh:latest
+          env:
+            - name: APP__SERVER__PORT
+              value: "8080"
+            - name: APP__REDIS__URL
+              valueFrom:
+                secretKeyRef:
+                  name: marrakesh-secrets
+                  key: redis-url
+            
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: marrakesh-secrets
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: marrakesh-secrets
+                  key: aws-secret-access-key
+            
 ```
+
 
 ---
 
@@ -397,7 +399,10 @@ kubectl apply -f my-secret.sealed.yaml
 
 1. **Build and push image**:
    ```bash
-    docker build -t ghcr.io/enchantednatures/marrakesh:v1.0 .
+    export CARGO_REGISTRIES_KELLNR_TOKEN=...   # or cargo login --registry kellnr
+    docker build \
+      --secret id=cargo_token,env=CARGO_REGISTRIES_KELLNR_TOKEN \
+      -t ghcr.io/enchantednatures/marrakesh:v1.0 .
     docker push ghcr.io/enchantednatures/marrakesh:v1.0
    ```
 

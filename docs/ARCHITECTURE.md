@@ -530,6 +530,7 @@ See `docs/TESTING.md` for detailed testing strategy.
 
 ## Deployment Architecture
 
+
 ```
 Git Repository
     │
@@ -565,6 +566,7 @@ Knative Controller
     ▼
 Pods Running on Nodes
 ```
+
 
 See `docs/DEPLOYMENT.md` for detailed deployment procedures.
 

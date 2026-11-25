@@ -3,7 +3,6 @@
 A production-ready Rust microservice for Knative Serverless and FluxCD GitOps, with S3-compatible object storage, Apache Kafka event integration.
 
 ## Features
-
 - 🚀 **Knative Serverless**: Auto-scaling HTTP service with CloudEvents support
 - 📦 **S3-Compatible Storage**: Object storage through the Ceph RGW bucket provisioner (RustFS locally)
 - 📨 **Kafka Event Source**: Knative KafkaSource for consuming Kafka events
@@ -11,7 +10,7 @@ A production-ready Rust microservice for Knative Serverless and FluxCD GitOps, w
 - ⚰️ **Dead Letter Queue**: Automatic DLQ handling for failed events
 - 🐉 **Managed Kafka**: Chart-rendered Redpanda cluster, Knative Kafka Broker, and Trigger
 - 📤 **Kafka Event Publishing**: Non-blocking event publishing from HTTP handlers
-- 🔄 **CloudEvents Standard**: Full CloudEvents 1.0 support via the vendored `axum-cloudevents` crate
+- 🔄 **CloudEvents Standard**: Full CloudEvents 1.0 support via the `axum-cloudevents` crate from your private Kellnr registry
 - 📊 **Publisher Metrics**: Prometheus metrics for event publishing
 - 🐘 **PostgreSQL**: CloudNativePG cluster with TLS, PgBouncer pooling, and Barman backups
 - 🚦 **Canary Releases**: Automated progressive delivery with Flagger (Knative provider)
@@ -33,11 +32,19 @@ A production-ready Rust microservice for Knative Serverless and FluxCD GitOps, w
 | helm | 3.14+ | chart rendering |
 | kustomize | 5.4+ | overlay rendering |
 | Flux CLI | 2.3+ | `make bootstrap` / `make deploy` (real clusters) |
+| Kellnr access | — | `axum-cloudevents` dependency (see `docs/CRATES.md`) |
+
+> `axum-cloudevents` is fetched from the private Kellnr registry. Authenticate
+> once with `cargo login --registry kellnr` or set
+> `CARGO_REGISTRIES_KELLNR_TOKEN`. CI uses the `KELLNR_TOKEN` repository secret.
+
+Knative Serving 1.12+ is required for the default Knative workload. Deployment
+mode does not need Knative.
 
 ## Local Development (Kind)
 
-The local environment is a Kind cluster with a local container registry, Knative
-Serving, Redis, RustFS, CloudNativePG, Kafka and the
+The local environment is a Kind cluster with a local container registry,
+Knative Serving, Redis, RustFS, CloudNativePG, Kafka and the
 observability stack (Jaeger, Prometheus, OTel Collector).
 
 ```bash
@@ -59,7 +66,7 @@ make dev-forward
 Day-to-day commands:
 
 ```bash
-make dev-restart   # rebuild the image and redeploy the Knative service
+make dev-restart   # rebuild the image and redeploy the application
 make dev-logs      # stream application logs
 make dev-status    # show pods/services across the dev cluster
 make dev-test      # run the integration tests against the local cluster
@@ -98,6 +105,7 @@ For private repositories, create the Flux SSH deploy-key Secret once:
 ```bash
 make git-auth
 ```
+
 
 
 ### PostgreSQL
@@ -221,9 +229,14 @@ marrakesh/
 │       ├── kafka.rs        # Event publishing
 │       └── mod.rs
 │
-├── crates/                 # Vendored CloudEvents crates
-│   ├── axum-cloudevents/
-│   └── axum-cloudevents-macros/
+├── .cargo/
+│   └── config.toml         # Kellnr registry index (no token)
+│
+├── crates/
+│   └── service-core/       # Shared config, state, observability, health
+│
+├── services/                 # Added services (make add-service)
+│   └── README.md
 │
 ├── config/
 │   ├── default.toml
@@ -308,15 +321,21 @@ uses the `APP__` prefix with `__` as the separator, e.g.
 | `GET /metrics` | Prometheus metrics |
 | `GET /` (POST for CloudEvents) | CloudEvents sink |
 | `GET /api/v1/hello` | Example handler |
-
-| `PUT /api/v1/items/{id}` | Upsert an item |
-| `GET /api/v1/items/{id}` | Read an item |
-
-
-| `POST /api/v1/publish-event` | Publish a CloudEvent to Kafka |
-
 | `GET /swagger-ui` | OpenAPI UI |
 | `GET /api-docs/openapi.json` | OpenAPI document |
+
+
+Additional endpoints:
+
+
+
+- `POST /api/v1/items` — Upsert an item
+- `GET /api/v1/items/{key}` — Read an item
+
+
+- `POST /api/v1/publish-event` — Publish a CloudEvent to Kafka
+
+
 
 `/api/v1/*` is rate limited to 100 requests/second with a burst of 50 per client
 IP; probes, metrics, and the CloudEvents sink are exempt. See `docs/API.md`.
@@ -332,19 +351,26 @@ cargo bench                     # criterion benchmarks
 ```
 
 CI runs the same commands for the all-features project, plus a release-profile
-build. See `docs/DEVELOPMENT.md` and `docs/TESTING.md`.
+build. The `axum-cloudevents` dependency resolves from Kellnr, so CI needs the
+`KELLNR_TOKEN` repository secret and local development needs
+`cargo login --registry kellnr` (or `CARGO_REGISTRIES_KELLNR_TOKEN`). See
+`docs/CRATES.md`.
 
 ### Building the Image
 
 ```bash
 cargo build --release
-docker build -t marrakesh:latest .
+export CARGO_REGISTRIES_KELLNR_TOKEN=...   # or cargo login --registry kellnr
+docker build \
+  --secret id=cargo_token,env=CARGO_REGISTRIES_KELLNR_TOKEN \
+  -t marrakesh:latest .
 ```
 
 The Dockerfile is a multi-stage build using `cargo-chef`; the runtime stage
 installs `ca-certificates`, `curl`, and `tzdata` and runs as the non-root
-`appuser`. The Docker `HEALTHCHECK` calls `/health/live` with `curl`; Knative
-ignores it and uses HTTP probes.
+`appuser`. The Docker `HEALTHCHECK` calls `/health/live` with `curl`;
+Kubernetes probes are configured by the chart in both workload modes. The
+Kellnr token is a BuildKit secret and is never written into an image layer.
 
 ## Observability
 
@@ -359,21 +385,56 @@ See `docs/MONITORING.md` and `docs/RUNBOOKS.md`.
 ```bash
 make dev-status                          # cluster and service status
 make dev-logs                            # application logs
+
 kubectl get ksvc -n marrakesh   # Knative service state
 kubectl describe ksvc marrakesh -n marrakesh
+
 ```
 
 Common causes:
 
-- **ImagePullBackOff**: the image tag must match the Knative service name
-  (hyphens, not underscores) and be pushed to the registry the cluster can reach.
+- **ImagePullBackOff**: the image tag must match the workload name (hyphens,
+  not underscores) and be pushed to the registry the cluster can reach.
 - **Revision not ready**: check `/health/ready`; it reports dependency failures.
+
 
 - **UnknownIssuer on PostgreSQL**: the PgBouncer pooler service name must be in
   the Cluster's `spec.certificates.serverAltDNSNames`.
 
 
 See `docs/TROUBLESHOOTING.md` and `docs/FAQ.md`.
+
+## Adding a Service
+
+This project is a Cargo workspace. The first service is the workspace root package;
+later services are generated into `services/<service-slug>/` with the thin-service
+sub-template that ships in the platform template.
+
+```bash
+# Recommended: detect existing infrastructure and register the service
+make add-service --name orders-api --workload knative
+```
+
+Directly with cargo-generate (the subfolder is selected positionally, not through
+`sub_templates`):
+
+```bash
+mkdir -p services/orders-api
+cargo generate --git https://github.com/enchantednatures/rust-knative-flux-template service-template \
+  --name orders-api \
+  --init \
+  --template-values-file /tmp/orders-api-values.toml \
+  --destination services/orders-api
+```
+
+The values file must be TOML with a `[values]` table, and the destination must already
+exist. Use `--workload deployment` through `make add-service` for a plain Kubernetes
+Deployment instead of a Knative Service. KafkaSource consumption and Flagger canaries
+are Knative-only; added services reuse the existing PostgreSQL cluster, S3 bucket
+claim, Redis, telemetry, and Kafka broker rather than re-provisioning them.
+
+See [docs/SERVICE_TEMPLATE.md](docs/SERVICE_TEMPLATE.md) for the full invocation
+contract, template values, workload/feature matrix, and limitations.
 
 ## Contributing
 

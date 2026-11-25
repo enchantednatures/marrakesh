@@ -33,10 +33,18 @@ pub async fn create_test_state() -> AppState {
 
     // Initialize metrics properly (same as production) to ensure tests match runtime behavior
     let metrics_handle = METRICS_HANDLE
-        .get_or_init(|| observability::init_metrics().expect("Failed to initialize metrics"))
+        .get_or_init(|| {
+            observability::init_metrics(env!("CARGO_PKG_NAME"))
+                .expect("Failed to initialize metrics")
+        })
         .clone();
-    let storage = create_test_storage();
-    AppState::new(conn, storage, None, None, metrics_handle)
+
+    AppState::builder(conn, metrics_handle)
+        .storage(create_test_storage())
+        .kafka_publisher(None)
+        .postgres(None)
+        .build()
+        .expect("Failed to build test AppState")
 }
 
 /// Build a `TestServer` for the app router with a synthetic peer address.
@@ -44,12 +52,14 @@ pub async fn create_test_state() -> AppState {
 /// The rate limiter (`tower_governor`) reads the client IP from the
 /// `ConnectInfo` request extension that `axum::serve` inserts at runtime;
 /// `axum-test`'s mocked transport does not, so inject a loopback address.
+#[allow(dead_code)]
 pub fn create_test_server(state: AppState) -> TestServer {
     let app = marrakesh::routes::create_router(state)
         .layer(axum::middleware::from_fn(inject_connect_info));
     TestServer::new(app).expect("Failed to create test server")
 }
 
+#[allow(dead_code)]
 async fn inject_connect_info(mut request: Request<Body>, next: Next) -> Response {
     request
         .extensions_mut()

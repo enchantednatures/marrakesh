@@ -30,13 +30,17 @@
   - Monitoring and alerting
 
 ### Events & Messaging
-- **Kafka**: Event source via Knative Eventing
 - **CloudEvents**: Automatic format conversion
+
+- **Kafka**: Event source via Knative Eventing
 - **DLQ**: Dead Letter Queue for failed events
 - **Consumer Scaling**: Automatic to match partitions
 
+
 ### Deployment & Infrastructure
+
 - **Knative Serving**: Auto-scaling (min 1, max 100, scale-to-zero)
+
 - **FluxCD**: Git-driven deployment
 - **Docker**: Multi-stage, optimized builds
 - **Kustomize**: Base + overlays (dev/staging/prod)
@@ -144,8 +148,11 @@ cargo run
 
 - **ARCHITECTURE.md** - System design and component breakdown
 - **DEPLOYMENT.md** - Production deployment procedures
+
 - **MONITORING.md** - Observability setup and dashboards
+
 - **KAFKA_EVENTING.md** - Event-driven architecture guide
+
 - **POSTGRES.md** - Database operations and backup/recovery
 - **SECURITY.md** - Security hardening guide
 - **TESTING.md** - Testing strategy and examples

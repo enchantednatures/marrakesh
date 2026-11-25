@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (template sync, 2026-11-25)
+
+- Regenerated from `rust-knative-flux-template` `af1bc62` (multi-service
+  workspace, Kellnr-published crates, and the Deployment workload option).
+- Shared infrastructure moved to the `crates/service-core` workspace crate:
+  config, state, observability, middleware, health, the Kafka publisher, and
+  startup/bootstrap. The vendored `crates/axum-cloudevents*` crates are gone;
+  `axum-cloudevents` now resolves from the private Kellnr registry. Local
+  builds need `cargo login --registry kellnr` (or
+  `CARGO_REGISTRIES_KELLNR_TOKEN`), CI/Docker use the `KELLNR_TOKEN` secret.
+- The workspace root package remains the first service; `services/` and
+  `make add-service` are available for additional services. The Dockerfile
+  builds the selected service (`SERVICE_DIR`/`SERVICE_PKG`/`SERVICE_BIN`) and
+  passes the Kellnr token as a BuildKit secret.
+- `deploy/chart/Chart.lock` is committed so Flux resolves the `ksvc` OCI
+  dependency; chart tarballs are no longer committed (local rendering runs
+  `helm dependency build`).
+- The base HelmRelease now carries the 10m install/upgrade timeout and the
+  `dragonfly.enabled: false` key; the dev overlay enables Dragonfly with a
+  `replace` and the Kind app overlay clears `objectBuckets` with `add {}`.
+- Added `template-values.toml` to record the generation values, and pinned
+  `scripts/service-template.env` `TEMPLATE_REF` to the synced template commit.
+- Preserved the home-cluster overrides: external RustFS and Tempo, Dragonfly,
+  cluster-wide Flagger/CNPG/ARC wiring, the `kube-prometheus-stack` metric
+  gates, the pinned app image tag, and the ARC runner sizing.
+
 ### Changed (template sync, 2026-11-05)
 
 - Regenerated from `rust-knative-flux-template` `7a156ff` (the managed Kafka

@@ -18,7 +18,9 @@ Common questions about marrakesh.
 ### What is marrakesh?
 
 marrakesh is a production-ready Rust microservice template built for:
+
 - **Knative Serving**: Serverless auto-scaling
+
 - **FluxCD**: GitOps deployment
 - **OpenTelemetry**: Observability stack
 
@@ -34,12 +36,14 @@ It provides a complete starting point for building cloud-native services.
 - **Concurrency**: Async/await with Tokio
 - **Type-Safe**: Compiler catches many errors at compile time
 
+
 ### Why Knative Serving?
 
 - **Serverless**: Automatic scale-to-zero
 - **Auto-scaling**: Handles traffic spikes automatically
 - **Simple**: Deploy as a service, Knative handles pods
 - **Industry Standard**: Used by major cloud providers
+
 
 ### Why FluxCD?
 
@@ -161,6 +165,7 @@ flux create kustomization marrakesh \
 
 ### How do I rollback a deployment?
 
+
 ```bash
 # Rollback to previous revision
 kubectl rollout undo deployment/marrakesh -n marrakesh
@@ -171,6 +176,8 @@ kubectl set traffic marrakesh \
   --percent=100 \
   -n marrakesh
 ```
+
+
 
 ### How does Knative auto-scaling work?
 
@@ -189,6 +196,7 @@ autoscaling.knative.dev/minScale: "5"
 autoscaling.knative.dev/maxScale: "100"
 autoscaling.knative.dev/target: "100"  # Target concurrency
 ```
+
 
 ---
 
@@ -278,14 +286,18 @@ Check:
 # Pod status
 kubectl get pods -n marrakesh
 
-# Service status
+# Workload status
+
 kubectl get ksvc marrakesh -n marrakesh
+
 
 # Pod logs
 kubectl logs deployment/marrakesh -n marrakesh
 
-# Service details
+# Workload details
+
 kubectl describe ksvc marrakesh -n marrakesh
+
 ```
 
 Common causes:
@@ -368,6 +380,7 @@ kubectl logs -n flux-system deployment/kustomize-controller
 
 ### How do I handle high traffic?
 
+
 **Knative auto-scales automatically**, but you can tune:
 
 ```yaml
@@ -384,7 +397,9 @@ kubectl patch ksvc marrakesh -n marrakesh \
   -p '{"spec":{"template":{"metadata":{"annotations":{"autoscaling.knative.dev/minScale":"50"}}}}}'
 ```
 
+
 ### How do I reduce cold start latency?
+
 
 1. **Increase min-scale**: Keep warm pods
 2. **Optimize startup**: Remove unnecessary initialization
@@ -395,6 +410,7 @@ kubectl patch ksvc marrakesh -n marrakesh \
 annotations:
   autoscaling.knative.dev/minScale: "1"  # Don't scale to zero
 ```
+
 
 ---
 

@@ -18,39 +18,72 @@ jobs:
   lint:
     name: Lint & Format
     runs-on: marrakesh-runner
+    env:
+      CARGO_REGISTRIES_KELLNR_TOKEN: ${{ secrets.KELLNR_TOKEN }}
     steps:
       - uses: actions/checkout@v7
 
-      
+      - name: Verify Kellnr token
+        run: |
+          if [ -z "${CARGO_REGISTRIES_KELLNR_TOKEN:-}" ]; then
+            echo "::error::KELLNR_TOKEN repository secret is required to resolve axum-cloudevents from Kellnr"
+            exit 1
+          fi
+
       - name: Install build dependencies
         run: |
-          # The ARC runner image is minimal; the crates need a C linker and
-          # the rdkafka `cmake-build` feature needs cmake at compile time.
+          # Unconditional: service-core always declares the optional `kafka`
+          # feature, so `--all-features` compiles rdkafka (cmake-build) even
+          # when the project was generated with feature_kafka=false. The ARC
+          # runner image is minimal; the crates need a C linker too.
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libssl-dev cmake libcurl4-openssl-dev libsasl2-dev libzstd-dev zlib1g-dev
-      
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Cache cargo registry
-        uses: actions/cache@v6
+      - name: Restore cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        # Restore is a normal step, so the timeout bounds it. Do NOT cache
+        # `target` here: on ARC runners it is ~1.7 GB and its upload took
+        # ~20 minutes, blocking the downstream Build & Push job.
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+
+      - name: Check service-core feature matrix
+        # Runs always (no feature-flag guard): every generated project ships
+        # service-core with the optional postgres/s3/kafka features, and the
+        # app crate must compile with the generated feature set.
+        run: bash scripts/check-feature-matrix.sh
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Save cargo cache
+        # An explicit save step (not actions/cache's post-job hook) so a slow
+        # cache service is bounded and cannot stall the pipeline.
+        if: ${{ always() && steps.cargo-cache.outputs.cache-hit != 'true' && steps.cargo-cache.outputs.cache-primary-key != '' }}
+        uses: actions/cache/save@v6
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # ==========================================================================
   # Quality Gates - Tests
@@ -58,17 +91,27 @@ jobs:
   test:
     name: Test
     runs-on: marrakesh-runner
+    env:
+      CARGO_REGISTRIES_KELLNR_TOKEN: ${{ secrets.KELLNR_TOKEN }}
     steps:
       - uses: actions/checkout@v7
 
-      
+      - name: Verify Kellnr token
+        run: |
+          if [ -z "${CARGO_REGISTRIES_KELLNR_TOKEN:-}" ]; then
+            echo "::error::KELLNR_TOKEN repository secret is required to resolve axum-cloudevents from Kellnr"
+            exit 1
+          fi
+
       - name: Install build dependencies
         run: |
-          # The ARC runner image is minimal; the crates need a C linker and
-          # the rdkafka `cmake-build` feature needs cmake at compile time.
+          # Unconditional: service-core always declares the optional `kafka`
+          # feature, so the workspace `--all-features` checks compile rdkafka
+          # (cmake-build) even when the project was generated with
+          # feature_kafka=false. The ARC runner image is minimal; the crates
+          # need a C linker too.
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libssl-dev cmake libcurl4-openssl-dev libsasl2-dev libzstd-dev zlib1g-dev
-      
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -97,13 +140,17 @@ jobs:
           done
           docker exec redis redis-cli ping
 
-      - name: Cache cargo registry
-        uses: actions/cache@v6
+      - name: Restore cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        # Same policy as the lint job: registry/git only, no `target`, and a
+        # bounded restore.
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
@@ -111,6 +158,8 @@ jobs:
       
       - name: Cache RustFS client
         uses: actions/cache@v6
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           path: ~/.cargo/bin/rc
           key: rustfs-cli-0.1.36-${{ runner.os }}
@@ -137,7 +186,7 @@ jobs:
           rc bucket create -p local/data
       
       - name: Run tests
-        run: cargo test --all-features
+        run: cargo test --workspace
         env:
           APP__REDIS__URL: redis://localhost:6379
           
@@ -147,6 +196,19 @@ jobs:
           AWS_ACCESS_KEY_ID: rustfsadmin
           AWS_SECRET_ACCESS_KEY: rustfsadmin
           
+
+      - name: Save cargo cache
+        # Explicit save step so a slow/failing cache service is bounded by the
+        # timeout and cannot stall Build & Push.
+        if: ${{ always() && steps.cargo-cache.outputs.cache-hit != 'true' && steps.cargo-cache.outputs.cache-primary-key != '' }}
+        uses: actions/cache/save@v6
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   
   # ==========================================================================
@@ -179,11 +241,20 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      CARGO_REGISTRIES_KELLNR_TOKEN: ${{ secrets.KELLNR_TOKEN }}
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
       image-digest: ${{ steps.build-push.outputs.digest }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Verify Kellnr token
+        run: |
+          if [ -z "${CARGO_REGISTRIES_KELLNR_TOKEN:-}" ]; then
+            echo "::error::KELLNR_TOKEN repository secret is required for the Docker build"
+            exit 1
+          fi
 
       - name: Wait for Docker daemon
         run: |
@@ -232,6 +303,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          secrets: |
+            cargo_token=${{ secrets.KELLNR_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64

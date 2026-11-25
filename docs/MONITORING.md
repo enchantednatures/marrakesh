@@ -202,6 +202,8 @@ http_active_requests (gauge)
 - `path`: Request path
 - `status`: HTTP status code (200, 404, 500, etc.)
 
+
+
 ### Accessing Prometheus
 
 **Local**: http://localhost:9090

@@ -213,6 +213,7 @@ cat src/lib.rs
 
 ## Kubernetes Issues
 
+
 ### Knative Service Not Ready
 
 **Symptoms**:
@@ -247,6 +248,7 @@ kubectl get ksvc marrakesh -n marrakesh -o jsonpath='{.status.conditions}'
 - `ConfigurationsReady: False` - ConfigMap/Secret missing
 - `Ready: False` - Pod not running
 - `RoutesReady: False` - Networking issue
+
 
 ### ImagePullBackOff
 
@@ -815,7 +817,9 @@ What to do:
 
 Verify:
 ```bash
+
 kubectl get ksvc <service> -n <namespace> -o jsonpath='{.spec.template.spec.containers[*].image}'
+
 ```
 
 ### require-pod-resources
@@ -824,7 +828,9 @@ A policy that requires every container to declare requests and limits rejects po
 - app Knative Service: request and limits in `services.app.resources`.
 - CNPG `Cluster`: pod-level `resources` (requests and limits).
 - `Pooler`: a `pgbouncer` container with requests and limits.
+
 - Kafka DLQ Knative Service: requests and limits.
+
 
 If a policy also caps values, patch them per environment in the overlay (a JSON6902 or strategic-merge patch on the HelmRelease `spec.values`). A missing `resources` block on an extra sidecar or init container is the usual cause when the app is admitted but a helper pod is not.
 
@@ -882,7 +888,9 @@ kubectl logs deployment/marrakesh -n marrakesh
 
 2. Describe resources:
 ```bash
+
 kubectl describe ksvc marrakesh -n marrakesh
+
 kubectl describe pod <pod-name> -n marrakesh
 ```
 
@@ -912,11 +920,11 @@ kubectl version --client
 # Cluster info
 kubectl cluster-info
 
-# Service status
-kubectl get ksvc marrakesh -n marrakesh -o yaml
+# Workload status
 
-# Pod status
+kubectl get ksvc marrakesh -n marrakesh -o yaml
 kubectl get pods -n marrakesh -l serving.knative.dev/service=marrakesh -o yaml
+
 
 # Service logs
 kubectl logs deployment/marrakesh -n marrakesh

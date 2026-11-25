@@ -1,5 +1,6 @@
 # Knative Eventing Guide
 
+
 This document explains how to emit CloudEvents to your Knative service and how Knative routes them to your application.
 
 ## Overview

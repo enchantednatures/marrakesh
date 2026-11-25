@@ -5,7 +5,9 @@ namespace: marrakesh
 
 resources:
   - ../../base
-  
+  # Added services register their self-contained per-environment deploy
+  # subtree here (written by `make add-service`):
+  # - ../../../services/<service>/deploy/overlays/prod
   - namespace.yaml
   
 

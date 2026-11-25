@@ -3,7 +3,7 @@ kind: Kustomization
 
 # Kind-local variant of the dev overlay: the dev overlay wires chart-created
 # Ceph buckets, but the local Kind cluster has no bucket provisioner. This
-# layer drops the ObjectBucketClaim values and points the CNPG ObjectStore
+# layer clears the ObjectBucketClaim values and points the CNPG ObjectStore
 # back at the in-cluster RustFS (whose init job stands in for the provisioner).
 #
 # It is also the Kind fallback for kafka_managed_cluster: Kind has no Redpanda
@@ -16,9 +16,21 @@ resources:
 patches:
 
   # This repo's dev overlay uses external RustFS rather than chart-created
-  # ObjectBucketClaims, so there is no objectBuckets block to drop here.
-  # Kind is not the primary target for marrakesh; the home-cluster overlay is
-  # the supported deployment path.
+  # ObjectBucketClaims, so there is nothing to clear here. Kind is not the
+  # primary target for marrakesh; the home-cluster overlay is the supported
+  # deployment path.
+  #
+  # The empty map is the chart default: use `add` rather than `remove` so the
+  # patch also works for a project whose dev overlay never declares
+  # `objectBuckets` (a JSON6902 `remove` fails the whole render when the path
+  # is absent).
+  - target:
+      kind: HelmRelease
+      name: marrakesh
+    patch: |-
+      - op: add
+        path: /spec/values/objectBuckets
+        value: {}
 
   # Backups keep using the local RustFS in Kind.
   - target:
@@ -73,4 +85,3 @@ replacements:
           name: marrakesh
         fieldPaths:
           - spec.values.services.app.env.[name=APP__KAFKA__BROKER_URL].value
-

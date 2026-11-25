@@ -1,0 +1,89 @@
+# Canonical generation values for this project.
+#
+# This file is the record of how marrakesh was created from the
+# rust-knative-flux-template. To recreate the generated baseline (for example to
+# diff a template update before merging it by hand):
+#
+#   git -C ../rust-knative-flux-template checkout af1bc62
+#   cargo generate \
+#     --path ../rust-knative-flux-template \
+#     --name marrakesh \
+#     --template-values-file template-values.toml \
+#     --destination /tmp/marrakesh-regenerate \
+#     --silent --allow-commands
+#
+# The output is the template baseline only. This repository intentionally keeps
+# home-cluster overrides on top of it (external RustFS/Tempo, Dragonfly, pinned
+# image tags, operator wiring, Prometheus addresses, CI runner sizing). Diff the
+# regenerated tree against this repository to review template drift, then port
+# the template-owned changes and re-apply those overrides.
+#
+# template_ref pins `make add-service` to the template revision this workspace
+# was synced from; bump it together with the next template sync.
+[values]
+project_name = "marrakesh"
+project_author = "Hunter Casten <huntercasten@icloud.com>"
+template_repo_url = "https://github.com/enchantednatures/rust-knative-flux-template"
+template_ref = "af1bc62"
+kellnr_index = "sparse+https://crates.enchantednatures.com/api/v1/crates/"
+workload_type = "Knative"
+feature_s3 = true
+feature_postgres = true
+feature_kafka = true
+feature_flagger = true
+feature_gha_runner = true
+feature_cluster_smoke = false
+event_source_kafka = true
+feature_cron = false
+enable_image_updates = false
+target_namespace = "marrakesh"
+github_org = "enchantednatures"
+github_repo = "marrakesh"
+default_branch = "main"
+image_registry = "ghcr.io"
+git_auth_secret = "marrakesh-git-auth"
+image_pull_secret = "ghcr-pull-secret"
+custom_domain = "marrakesh.enchantednatures.com"
+network_policy_allow_all = true
+use_default_scaling = true
+kafka_topic = "events"
+kafka_consumer_group = "marrakesh-consumers"
+kafka_bootstrap_servers_staging = "kafka.staging.svc.cluster.local:9092"
+kafka_bootstrap_servers_prod = "kafka.prod.svc.cluster.local:9092"
+kafka_managed_cluster = true
+kafka_managed_provider = "redpanda"
+kafka_storage_class = "ceph-block"
+feature_bucket_notifications = false
+ceph_object_store_name = "ceph-objectstore"
+ceph_object_store_namespace = "rook-ceph"
+postgres_version = "18"
+postgres_pooler = true
+postgres_pooler_instances_dev = "1"
+postgres_pooler_instances_staging = "2"
+postgres_pooler_instances_prod = "4"
+postgres_instances_dev = "1"
+postgres_instances_staging = "2"
+postgres_instances_prod = "3"
+postgres_storage_class = "ceph-block"
+backup_schedule = "0 2 * * *"
+backup_retention_dev = "7"
+backup_retention_staging = "14"
+backup_retention_prod = "30"
+barman_plugin_installed = true
+ceph_rgw_endpoint_dev = "http://rook-ceph-rgw-ceph-objectstore.rook-ceph.svc:80"
+ceph_rgw_endpoint_staging = "https://rook-ceph-rgw-ceph-objectstore.rook-ceph.svc:443"
+ceph_rgw_endpoint_prod = "https://rook-ceph-rgw-ceph-objectstore.rook-ceph.svc:443"
+ceph_bucket_storage_class = "ceph-bucket"
+kafka_broker_url = "kafka.kafka.svc.cluster.local:9092"
+kafka_event_name = "com.marrakesh.event.published"
+canary_success_rate_threshold = "99"
+canary_latency_threshold_ms = "500"
+flagger_prometheus_url_staging = "http://prometheus.observability.svc.cluster.local:9090"
+flagger_prometheus_url_prod = "http://prometheus.observability.svc.cluster.local:9090"
+flagger_operator_metrics_server = "http://prometheus.observability.svc.cluster.local:9090"
+gha_runner_chart_version = "0.15.1"
+gha_runner_image_tag = "2.338.2"
+gha_runner_max = "4"
+gha_runner_storage_class = "ceph-block"
+gha_runner_priority_class = "actions-runner-high-priority"
+gha_runner_storage_size = "50Gi"

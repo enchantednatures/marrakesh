@@ -4,7 +4,7 @@ Complete reference for marrakesh HTTP endpoints, request/response formats, and e
 
 ## Base URL and Versioning
 
-**Base URL**: `http://localhost:8080` (local) or service URL from Knative (production)
+**Base URL**: `http://localhost:8080` (local) or the service URL from Knative (production)
 
 **API Version**: Currently unversioned (v1 coming in future releases)
 
@@ -124,6 +124,7 @@ http_request_total{method="GET",path="/health/live",status="200"} 45
 **Use Case**: Prometheus scraping, alerting, dashboards
 
 ---
+
 
 
 
@@ -491,8 +492,7 @@ applied in `src/routes.rs` to the `/api/v1/*` router only:
 | `per_second` | 100 | Tokens replenished per second, per client |
 | `burst_size` | 50 | Maximum tokens a client may accumulate (burst) |
 
-The client key is the connection's peer IP address (the Knative activator or
-Kourier gateway address in-cluster), so limits apply per upstream connection.
+The client key is the connection's peer IP address (the Knative activator or Kourier gateway address in-cluster), so limits apply per upstream connection.
 
 **Exceeding the limit** returns `429 Too Many Requests` with rate-limit
 headers:

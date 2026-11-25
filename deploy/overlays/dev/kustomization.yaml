@@ -5,6 +5,9 @@ namespace: marrakesh
 
 resources:
   - ../../base
+  # Added services register their self-contained per-environment deploy
+  # subtree here (written by `make add-service`):
+  # - ../../../services/<service>/deploy/overlays/dev
   - namespace.yaml
   # Kyverno generates a default-deny NetworkPolicy into every new namespace;
   # app namespaces on this cluster ship an allow-all policy to lift it.
@@ -32,16 +35,6 @@ patches:
     # strategic merge would name-merge it with the base entries), and the
     # same style is kept for the rest of the values.
     patch: |-
-      # Cold-start allowance: the chart waits for the Redpanda cluster, Topic,
-      # Broker, KafkaSource and Trigger in addition to the Knative Service.
-      - op: add
-        path: /spec/install
-        value:
-          timeout: 10m
-      - op: add
-        path: /spec/upgrade
-        value:
-          timeout: 10m
       - op: replace
         path: /spec/values/services/app/image
         value:
@@ -120,8 +113,9 @@ patches:
             value: "marrakesh-kafka:9093"
       # Dedicated Dragonfly cache rendered by the ksvc chart (Dragonfly CR
       # named marrakesh-dragonfly; the operator creates the matching Service).
-      # `add` (not `replace`) because the base HelmRelease has no dragonfly key.
-      - op: add
+      # The base HelmRelease declares `dragonfly.enabled: false`; replace the
+      # object to turn it on with this environment's sizing.
+      - op: replace
         path: /spec/values/dragonfly
         value:
           enabled: true

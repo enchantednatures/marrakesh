@@ -7,7 +7,7 @@ This document outlines Knative-specific constraints, limitations, and best pract
 Before deploying, render the chart and check the resulting Knative Service:
 
 ```bash
-# Local chart + the HelmRelease values it is rendered with
+# Chart.lock pins the ksvc OCI dependency. Build it for local rendering:
 helm dependency build deploy/chart
 yq eval '.spec.values' deploy/base/helmrelease.yaml > /tmp/values.yaml
 helm template my-service deploy/chart -f /tmp/values.yaml -n default > /tmp/rendered.yaml
@@ -15,6 +15,10 @@ helm template my-service deploy/chart -f /tmp/values.yaml -n default > /tmp/rend
 # Overlay render (HelmRelease + Flux wiring)
 kubectl kustomize deploy/overlays/dev > /tmp/overlay.yaml
 ```
+
+Flux's source-controller builds this local chart and resolves the OCI
+dependency from `Chart.yaml`/`Chart.lock` at reconcile time; the dependency
+tarball is not committed.
 
 CI runs both of these for every generated project. This catches:
 - ✓ Unsupported field references (fieldRef)
@@ -334,6 +338,7 @@ error: trouble configuring builtin PatchTransformer
 
 **Solution:** Render the chart and overlays
 ```bash
+helm dependency build deploy/chart
 helm template my-service deploy/chart -f <(yq eval '.spec.values' deploy/base/helmrelease.yaml) -n default
 kubectl kustomize deploy/overlays/dev
 ```
@@ -350,6 +355,35 @@ kubectl kustomize deploy/overlays/dev
 - [ ] Resource limits - Prevent resource exhaustion
 - [ ] Health probes - Detect and restart failures
 - [ ] Image scanning - Validate base images
+
+---
+
+## Deployment Workload Alternative
+
+The template defaults to a Knative Service, but `workload_type = "Deployment"`
+renders a standard `apps/v1 Deployment` plus a core `v1 Service` and an optional
+`PodDisruptionBudget`. Use it for WebSockets, SSE, streaming gateways, or any
+connection that must stay open longer than Knative's default 300-second request
+timeout.
+
+Knative-specific constraints in this document (request timeout, scale-to-zero,
+revision traffic splitting, `fieldRef` restrictions) do not apply to a plain
+Deployment. In exchange, the chart rejects or cannot target the following:
+
+| Knative feature | Deployment-mode behavior |
+|---|---|
+| Flagger `Canary` | Not generated; the Knative provider targets a Knative Service |
+| `KafkaSource` / `Trigger` sink | Not generated; a core Service is not a Knative-addressable sink |
+| `PingSource` | Not generated; same addressable requirement |
+| `DomainMapping` / `custom_domain` | Not generated; use an Ingress or LoadBalancer Service |
+| Scale-to-zero | Not available; replicas are fixed per environment |
+
+The rendered Deployment keeps the same probes, security context, resource
+limits, and `/tmp` emptyDir as the Knative path. Long-lived connections should
+set `preStopSleepSeconds` below `terminationGracePeriodSeconds` so endpoint
+removal propagates before SIGTERM, and clients must reconnect on disconnect.
+
+
 
 ---
 

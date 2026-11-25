@@ -331,7 +331,9 @@ dependencies = [
 
 [[package]]
 name = "axum-cloudevents"
-version = "0.1.0"
+version = "0.1.1"
+source = "sparse+https://crates.enchantednatures.com/api/v1/crates/"
+checksum = "67beed04be100aa5bb6857b2e5967cd22c386fc64e6dbfe02f4ffe93ad425806"
 dependencies = [
  "axum",
  "axum-cloudevents-macros",
@@ -345,7 +347,9 @@ dependencies = [
 
 [[package]]
 name = "axum-cloudevents-macros"
-version = "0.1.0"
+version = "0.1.1"
+source = "sparse+https://crates.enchantednatures.com/api/v1/crates/"
+checksum = "4060399d509b9917287474d21c96740645b20b484160f28e9e4d6854e1bafba6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2825,12 +2829,12 @@ dependencies = [
  "pact_consumer",
  "pact_models",
  "proptest",
- "rdkafka",
  "redis",
  "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "service-core",
  "sqlx",
  "thiserror 2.0.21",
  "tokio",
@@ -5122,6 +5126,37 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "service-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "figment",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "opendal",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry-zipkin",
+ "opentelemetry_sdk",
+ "rdkafka",
+ "redis",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "utoipa",
+ "uuid",
+ "validator",
 ]
 
 [[package]]

@@ -50,8 +50,10 @@ curl http://localhost:8080/metrics | grep http_request_duration_seconds
 # Check pod status
 kubectl get pods -n marrakesh
 
-# Check service status
+# Check workload status
+
 kubectl get ksvc marrakesh -n marrakesh
+
 ```
 
 ### Step 2: Respond
@@ -85,7 +87,9 @@ kubectl scale deployment/marrakesh --replicas=20 -n marrakesh
 kubectl delete pod <pod-name> -n marrakesh
 
 # Disable canary (shift all traffic to stable)
+
 kubectl set traffic marrakesh --revision=marrakesh-stable --percent=100
+
 ```
 
 **Debug**:
@@ -110,8 +114,11 @@ kubectl logs -f deployment/marrakesh -n marrakesh
 # Run tests
 cargo test
 
-# Build and push image
-docker build -t ghcr.io/enchantednatures/marrakesh:fix-v1 .
+# Build and push image (Kellnr token passed as a BuildKit secret)
+export CARGO_REGISTRIES_KELLNR_TOKEN=...   # or cargo login --registry kellnr
+docker build \
+  --secret id=cargo_token,env=CARGO_REGISTRIES_KELLNR_TOKEN \
+  -t ghcr.io/enchantednatures/marrakesh:fix-v1 .
 docker push ghcr.io/enchantednatures/marrakesh:fix-v1
 
 # Deploy (via GitOps or manual)
@@ -179,6 +186,7 @@ kubectl rollout restart deployment/marrakesh -n marrakesh
 
 ## Scaling
 
+
 ### Manual Scale Up
 
 ```bash
@@ -222,6 +230,7 @@ kubectl patch ksvc marrakesh -n marrakesh -p '{"spec":{"template":{"metadata":{"
 # After event, reduce
 kubectl patch ksvc marrakesh -n marrakesh -p '{"spec":{"template":{"metadata":{"annotations":{"autoscaling.knative.dev/minScale":"5"}}}}}'
 ```
+
 
 ---
 
@@ -379,6 +388,8 @@ kubectl rollout undo deployment/marrakesh -n marrakesh
 
 ## Maintenance Windows
 
+
+
 ### Planned Maintenance
 
 **Step 1: Announce**:
@@ -388,11 +399,13 @@ kubectl rollout undo deployment/marrakesh -n marrakesh
 
 **Step 2: Prepare**:
 ```bash
+
 # Scale down gracefully
 kubectl patch ksvc marrakesh -n marrakesh -p '{"spec":{"template":{"metadata":{"annotations":{"autoscaling.knative.dev/minScale":"0"}}}}}'
 
 # Wait for pods to terminate
 kubectl wait --for=delete pods -l serving.knative.dev/service=marrakesh -n marrakesh --timeout=300s
+
 ```
 
 **Step 3: Perform Maintenance**:
@@ -403,11 +416,13 @@ kubectl wait --for=delete pods -l serving.knative.dev/service=marrakesh -n marra
 
 **Step 4: Verify**:
 ```bash
+
 # Scale up
 kubectl patch ksvc marrakesh -n marrakesh -p '{"spec":{"template":{"metadata":{"annotations":{"autoscaling.knative.dev/minScale":"5"}}}}}'
 
 # Wait for pods to be ready
 kubectl wait --for=condition=ready ksvc marrakesh -n marrakesh --timeout=300s
+
 
 # Test health
 kubectl exec deployment/marrakesh -n marrakesh -- curl localhost:8080/health/ready
@@ -415,12 +430,15 @@ kubectl exec deployment/marrakesh -n marrakesh -- curl localhost:8080/health/rea
 
 ### Rolling Updates (No Downtime)
 
+
 Knative supports zero-downtime deployments automatically:
 
 1. Deploy new image
 2. New pods start with new revision
 3. Traffic gradually shifts (if configured)
 4. Old pods drained after timeout
+
+
 
 **Configure Traffic Split**:
 ```bash
@@ -431,6 +449,7 @@ kubectl set traffic marrakesh \
   -n marrakesh
 ```
 
+
 ---
 
 ## Emergency Procedures
@@ -439,11 +458,13 @@ kubectl set traffic marrakesh \
 
 **Complete Outage Required**:
 ```bash
+
 # Scale to zero (emergency)
 kubectl patch ksvc marrakesh -n marrakesh -p '{"spec":{"template":{"metadata":{"annotations":{"autoscaling.knative.dev/minScale":"0"}}}}}'
 
 # Wait for termination
 kubectl wait --for=delete pods -l serving.knative.dev/service=marrakesh -n marrakesh
+
 ```
 
 ### Emergency Database Restore

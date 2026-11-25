@@ -25,13 +25,18 @@ pub enum AppError {
 
     #[error("Rate limit exceeded")]
     RateLimit,
+
     // String payload (like `Redis`) because `sqlx::Error` is not `Clone` and
     // `AppError` derives `Clone`; conversion happens in the `From` impl below.
+    #[cfg(feature = "postgres")]
     #[error("Database error: {0}")]
     Database(String),
 
+    #[cfg(feature = "postgres")]
     #[error("Not found: {0}")]
     NotFound(String),
+
+    #[cfg(feature = "kafka")]
     #[error("Kafka error: {0}")]
     Kafka(#[from] KafkaError),
 }
@@ -47,6 +52,8 @@ impl From<redis::RedisError> for AppError {
         AppError::Redis(err.to_string())
     }
 }
+
+#[cfg(feature = "postgres")]
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
         AppError::Database(err.to_string())
@@ -109,6 +116,7 @@ impl IntoResponse for AppError {
                     vec!["Too many requests. Please try again later.".to_string()],
                 )
             }
+            #[cfg(feature = "postgres")]
             AppError::Database(e) => {
                 tracing::error!(error = %e, error_type = "database", "Database error");
                 (
@@ -117,10 +125,12 @@ impl IntoResponse for AppError {
                     vec![e.to_string()],
                 )
             }
+            #[cfg(feature = "postgres")]
             AppError::NotFound(e) => {
                 tracing::warn!(error = %e, error_type = "not_found", "Resource not found");
                 (StatusCode::NOT_FOUND, "Not found", vec![e.to_string()])
             }
+            #[cfg(feature = "kafka")]
             AppError::Kafka(e) => {
                 tracing::error!(error = %e, error_type = "kafka", "Kafka error");
                 (
@@ -140,7 +150,9 @@ impl IntoResponse for AppError {
         (status, body).into_response()
     }
 }
+
 /// Kafka-specific error type with structured context for observability
+#[cfg(feature = "kafka")]
 #[derive(Error, Debug, Clone)]
 pub enum KafkaError {
     #[error("Kafka initialization failed: {0}")]
@@ -167,6 +179,7 @@ pub enum KafkaError {
     Internal(String),
 }
 
+#[cfg(feature = "kafka")]
 impl KafkaError {
     /// Creates a BrokerUnreachable error with structured context
     ///

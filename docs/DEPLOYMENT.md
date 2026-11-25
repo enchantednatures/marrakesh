@@ -30,7 +30,7 @@ When generating a project from this template, you'll be prompted for a `project_
 - `marrakesh` → Forces kebab-case for Kubernetes/Docker
 - `marrakesh` → Automatically converted to snake_case for Rust
 
-**Why This Matters**: Knative Services **cannot** contain underscores in their names. Using underscores will cause `ImagePullBackOff` errors because the image tag won't match the service name. The template handles this normalization automatically.
+**Why This Matters**: Kubernetes Service names **cannot** contain underscores in their names. Using underscores will cause `ImagePullBackOff` errors because the image tag won't match the service name. The template handles this normalization automatically.
 
 > **For Detailed Information**: Naming is normalized at generation time: Rust uses underscores, Kubernetes and Docker use hyphens. See the naming checks in `.github/workflows/naming-convention-tests.yaml` in the template repository.
 
@@ -43,7 +43,9 @@ When generating a project from this template, you'll be prompted for a `project_
 - [FluxCD GitOps Deployment](#fluxcd-gitops-deployment)
 - [Environment-Specific Deployment](#environment-specific-deployment)
 - [Rollback Procedures](#rollback-procedures)
+
 - [Traffic Splitting](#traffic-splitting)
+
 - [Monitoring Deployments](#monitoring-deployments)
 
 ---
@@ -56,6 +58,7 @@ When generating a project from this template, you'll be prompted for a `project_
 |----------|---------|---------|
 | kubectl | 1.24+ | Kubernetes CLI |
 | Knative Serving | 1.12+ | Serverless platform |
+
 | FluxCD CLI | 2.0+ | GitOps tool |
 | Docker | 20.10+ | Container build |
 | helm | 3.x+ | Package manager (optional) |
@@ -72,6 +75,7 @@ When generating a project from this template, you'll be prompted for a `project_
 - Kind (Kubernetes in Docker)
 - Minikube
 - Local development cluster
+
 
 ### Install Knative Serving
 
@@ -90,6 +94,7 @@ kubectl patch configmap/config-network \
 # Verify installation
 kubectl get pods -n knative-serving
 ```
+
 
 ### Install FluxCD
 
@@ -117,8 +122,11 @@ Before deploying to Kubernetes, test locally:
 ### 1. Build Docker Image
 
 ```bash
-# Build image
-docker build -t marrakesh:latest .
+# Build image (the Kellnr token is passed as a BuildKit secret)
+export CARGO_REGISTRIES_KELLNR_TOKEN=...   # or cargo login --registry kellnr
+docker build \
+  --secret id=cargo_token,env=CARGO_REGISTRIES_KELLNR_TOKEN \
+  -t marrakesh:latest .
 
 # Tag for registry
 docker tag marrakesh:latest ghcr.io/enchantednatures/marrakesh:v1.0.0
@@ -188,8 +196,10 @@ kubectl create secret generic marrakesh-s3 \
 ### Deploy Base Service
 
 ```bash
-# Apply the base HelmRelease (Flux renders the Knative Service via deploy/chart)
+# Apply the base HelmRelease. Flux builds deploy/chart and resolves the ksvc
+# OCI dependency from Chart.lock at reconcile time.
 kubectl apply -k deploy/base -n marrakesh
+
 
 # Get service URL
 kubectl get ksvc marrakesh -n marrakesh
@@ -197,7 +207,9 @@ kubectl get ksvc marrakesh -n marrakesh
 # Test
 export URL=$(kubectl get ksvc marrakesh -n marrakesh -o jsonpath='{.status.url}')
 curl https://$URL/health/live
+
 ```
+
 
 ---
 
@@ -395,6 +407,8 @@ flux get kustomizations --watch
 
 ## Environment-Specific Deployment
 
+
+
 ### Development
 
 ```bash
@@ -547,6 +561,7 @@ secretGenerator:
 
 ## Rollback Procedures
 
+
 ### Option 1: Manual Revision Rollback
 
 ```bash
@@ -563,6 +578,7 @@ kubectl set traffic marrakesh \
   -n marrakesh
 ```
 
+
 ### Option 2: Git Rollback (GitOps)
 
 ```bash
@@ -576,6 +592,7 @@ git push origin main
 flux get kustomizations -n marrakesh
 ```
 
+
 ### Option 3: Canary Rollback
 
 If using canary deployment:
@@ -588,7 +605,9 @@ kubectl set traffic marrakesh \
   -n marrakesh
 ```
 
+
 ---
+
 
 ## Traffic Splitting
 
@@ -654,6 +673,8 @@ kubectl set traffic marrakesh \
 # Delete blue later after verification
 ```
 
+
+
 ---
 
 ## Monitoring Deployments
@@ -661,6 +682,7 @@ kubectl set traffic marrakesh \
 ### Check Service Status
 
 ```bash
+
 # Get service URL
 kubectl get ksvc marrakesh -n marrakesh
 
@@ -672,6 +694,7 @@ kubectl get pods -n marrakesh -l serving.knative.dev/service=marrakesh
 
 # Get revisions
 kubectl revisions list -n marrakesh
+
 ```
 
 ### Check FluxCD Status
@@ -702,9 +725,11 @@ kubectl logs -f -n marrakesh <pod-name>
 # Previous revision logs
 kubectl logs -f -n marrakesh deployment/marrakesh --previous
 
+
 # Knative serving logs
 kubectl logs -n knative-serving deployment/controller
 kubectl logs -n knative-serving deployment/autoscaler
+
 ```
 
 ---
@@ -861,6 +886,7 @@ EOF
 
 ## Troubleshooting Deployments
 
+
 ### Service Not Ready
 
 ```bash
@@ -869,12 +895,13 @@ kubectl describe ksvc marrakesh -n marrakesh
 
 # Check conditions
 kubectl get ksvc marrakesh -n marrakesh -o jsonpath='{.status.conditions[*]}' | jq
-
-# Common issues:
-# - ImagePullBackOff: Check image registry credentials
-# - CrashLoopBackOff: Check application logs
-# - ConfigMissing: Check ConfigMaps and Secrets exist
 ```
+
+
+Common issues:
+- **ImagePullBackOff**: check image registry credentials.
+- **CrashLoopBackOff**: check application logs.
+- **ConfigMissing**: check ConfigMaps and Secrets exist.
 
 ### Pods Not Starting
 
