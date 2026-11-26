@@ -41,7 +41,7 @@ patches:
           repository: "ghcr.io/enchantednatures/marrakesh"
           # CI-built sha-<commit> for the template-sync merge. The cluster's
           # Kyverno disallow-latest-tag policy requires a pinned tag.
-          tag: "sha-61e5b61"
+          tag: "sha-1882f85"
           imagePullSecrets:
             - name: ghcr-pull-secret
       - op: replace
