@@ -1,0 +1,65 @@
+name: Mirror image to Harbor
+
+# The home cluster pulls marrakesh from Harbor (harbor.enchantednatures.com)
+# because the GHCR pull credential expired. CI mirrors every main-build image
+# to Harbor, and this workflow can re-mirror an existing tag on demand:
+#
+#   gh workflow run mirror-harbor.yaml -f tag=sha-1882f85
+#
+# The build job in ci.yaml performs the same mirror for new main builds.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to mirror (for example sha-1882f85)"
+        required: true
+        type: string
+
+env:
+  SOURCE_REGISTRY: ghcr.io
+  HARBOR_REGISTRY: harbor.enchantednatures.com
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  mirror:
+    name: Mirror ${{ inputs.tag }}
+    runs-on: marrakesh-runner
+    steps:
+      - name: Wait for Docker daemon
+        run: |
+          # ARC kubernetes-mode runners start a DinD sidecar; wait for it.
+          for i in $(seq 1 60); do
+            docker info >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          docker info
+          exit 1
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.SOURCE_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Harbor
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.HARBOR_REGISTRY }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Pull, retag and push
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          src="${SOURCE_REGISTRY}/${{ github.repository }}:${TAG}"
+          dst="${HARBOR_REGISTRY}/marrakesh/marrakesh:${TAG}"
+          docker pull "$src"
+          docker tag "$src" "$dst"
+          docker push "$dst"
+          echo "Mirrored $src -> $dst"

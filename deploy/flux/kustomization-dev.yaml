@@ -27,7 +27,7 @@ spec:
       name: "marrakesh-postgres"
       namespace: marrakesh
   # SOPS decryption for the committed sops-encrypted secrets
-  # (deploy/overlays/dev/ghcr-pull-secret.sops.yaml, deploy/flux/bootstrap/).
+  # (deploy/overlays/dev/harbor-pull-secret.sops.yaml, deploy/flux/bootstrap/).
   # Requires an `sops-age` secret in the flux-system namespace (present on the
   # home cluster).
   decryption:

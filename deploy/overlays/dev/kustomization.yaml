@@ -18,7 +18,7 @@ resources:
   # cluster runs Knative with ClusterDomainClaims (no auto-create), so the
   # claim is part of the manifest too.
   - domain-mapping.yaml
-  - ghcr-pull-secret.sops.yaml
+  - harbor-pull-secret.sops.yaml
   # Redpanda Console for the app's managed Kafka (marrakesh-kafka:9093).
   - console.yaml
   - console-virtualservice.yaml
@@ -38,12 +38,13 @@ patches:
       - op: replace
         path: /spec/values/services/app/image
         value:
-          repository: "ghcr.io/enchantednatures/marrakesh"
-          # CI-built sha-<commit> for the template-sync merge. The cluster's
-          # Kyverno disallow-latest-tag policy requires a pinned tag.
+          # CI mirrors every main build to Harbor; the cluster pulls from
+          # Harbor because the GHCR pull token expired. The cluster's Kyverno
+          # disallow-latest-tag policy requires a pinned tag.
+          repository: "harbor.enchantednatures.com/marrakesh/marrakesh"
           tag: "sha-1882f85"
           imagePullSecrets:
-            - name: ghcr-pull-secret
+            - name: harbor-pull-secret
       - op: replace
         path: /spec/values/services/app/scaling
         value:

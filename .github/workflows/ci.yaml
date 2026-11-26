@@ -315,6 +315,29 @@ jobs:
           echo "Digest: ${{ steps.build-push.outputs.digest }}"
           echo "Tags: ${{ steps.meta.outputs.tags }}"
 
+      - name: Login to Harbor
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: harbor.enchantednatures.com
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Mirror image to Harbor
+        # The home cluster pulls from Harbor because the GHCR pull token
+        # expired. Mirror every main build so the dev overlay's pinned
+        # sha-<commit> tag exists in both registries.
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          tag="sha-${GITHUB_SHA::7}"
+          src="${REGISTRY}/${IMAGE_NAME}:${tag}"
+          dst="harbor.enchantednatures.com/marrakesh/marrakesh:${tag}"
+          docker pull "$src"
+          docker tag "$src" "$dst"
+          docker push "$dst"
+          echo "Mirrored $src -> $dst"
+
   # ==========================================================================
   # Security Scan (Optional)
   # ==========================================================================
