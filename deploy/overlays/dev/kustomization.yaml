@@ -47,7 +47,7 @@ patches:
           # Harbor because the GHCR pull token expired. The cluster's Kyverno
           # disallow-latest-tag policy requires a pinned tag.
           repository: "harbor.enchantednatures.com/marrakesh/marrakesh"
-          tag: "sha-1882f85"
+          tag: "sha-76fa30d"
           imagePullSecrets:
             - name: harbor-pull-secret
       - op: replace
