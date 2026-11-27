@@ -47,7 +47,7 @@ echo -e "${YELLOW}→${NC} Creating observability namespace..."
 kubectl create namespace observability 2>/dev/null || true
 
 # Deploy observability components
-echo -e "${YELLOW}→${NC} Deploying Jaeger, Prometheus, and OTel Collector..."
+echo -e "${YELLOW}→${NC} Deploying Jaeger, Prometheus, OTel Collector, and (when enabled) Grafana..."
 kubectl apply -k deploy/dev/observability || {
   echo -e "${RED}✗ Error: Failed to deploy observability stack${NC}"
   exit 1
@@ -115,6 +115,29 @@ if ! wait_for_pods observability app=prometheus 300; then
   echo "=== Events ==="
   kubectl get events -n observability --sort-by='.lastTimestamp' | tail -20
   exit 1
+fi
+
+# Grafana is generated only when feature_grafana_dashboards is enabled. The
+# deployment check keeps this script valid for projects without the feature.
+if kubectl get deployment grafana -n observability >/dev/null 2>&1; then
+  echo -e "${YELLOW}→${NC} Waiting for Grafana to be ready..."
+  if ! wait_for_pods observability app=grafana 300; then
+    echo -e "${RED}✗ Error: Grafana failed to become ready${NC}"
+    echo ""
+    echo "=== Pod Status ==="
+    kubectl get pods -n observability -l app=grafana
+    echo ""
+    echo "=== Pod Logs ==="
+    kubectl logs -l app=grafana -n observability --tail=100 --all-containers=true 2>&1 || true
+    echo ""
+    echo "=== Pod Descriptions ==="
+    kubectl describe pods -l app=grafana -n observability | head -100
+    echo ""
+    echo "=== Events ==="
+    kubectl get events -n observability --sort-by='.lastTimestamp' | tail -20
+    exit 1
+  fi
+  echo -e "${GREEN}✓ Grafana dashboard provisioning is ready${NC}"
 fi
 
 echo ""

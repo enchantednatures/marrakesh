@@ -13,7 +13,9 @@ data:
       # Scrape the application metrics endpoint
       - job_name: 'rust-service'
         static_configs:
-          - targets: ['marrakesh.default.svc.cluster.local:8080']
+          # Knative exposes 8080 directly; a Deployment Service fronts the pod
+          # with workload_service_port (default 80).
+          - targets: ['marrakesh.marrakesh.svc.cluster.local:8080']
         metrics_path: '/metrics'
         scrape_interval: 10s
 

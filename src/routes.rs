@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::{
     Router,
@@ -7,7 +8,7 @@ use axum::{
     middleware::Next,
     routing::{get, post},
 };
-use metrics::counter;
+use metrics::{counter, histogram};
 use tower::ServiceBuilder;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
@@ -57,10 +58,15 @@ use crate::state::AppState;
 struct ApiDoc;
 
 async fn metrics_middleware(req: Request<Body>, next: Next) -> axum::response::Response {
-    let counter = counter!("http_requests_total");
-    counter.increment(1);
-    tracing::debug!("HTTP request counted");
-    next.run(req).await
+    let start = Instant::now();
+    let response = next.run(req).await;
+    let status = response.status().as_u16().to_string();
+
+    counter!("http_requests_total", "status" => status.clone()).increment(1);
+    histogram!("http_request_duration_seconds", "status" => status)
+        .record(start.elapsed().as_secs_f64());
+    tracing::debug!("HTTP request counted with status and duration");
+    response
 }
 
 pub fn create_router(state: AppState) -> Router {

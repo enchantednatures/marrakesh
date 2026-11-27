@@ -109,6 +109,18 @@ async fn test_metrics_endpoint() {
         "Should contain app info metric. Got: {}",
         metrics_text
     );
+    assert!(
+        metrics_text.contains("http_requests_total{")
+            && metrics_text.contains("status=\"200\"")
+            && metrics_text.contains("service=\""),
+        "HTTP request counter should carry status and service labels. Got: {}",
+        metrics_text
+    );
+    assert!(
+        metrics_text.contains("http_request_duration_seconds"),
+        "Should contain HTTP latency histogram. Got: {}",
+        metrics_text
+    );
 
     // Verify the counter has a non-zero value (at least 4: live, ready, hello, metrics)
     assert!(

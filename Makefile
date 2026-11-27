@@ -125,6 +125,7 @@ local-up: ## Start full local development environment (Kind + all services)
 	@echo "     • Application:   ${GREEN}http://localhost:8080${NC}"
 	@echo "     • Jaeger UI:     ${GREEN}http://localhost:16686${NC}"
 	@echo "     • Prometheus:    ${GREEN}http://localhost:9090${NC}"
+	@echo "     • Grafana:       ${GREEN}http://localhost:3000${NC} (admin/admin)"
 	@echo "     • Redis:         ${GREEN}localhost:6379${NC}"
 	@echo "     • RustFS Console: ${GREEN}http://localhost:9001${NC} (rustfsadmin/rustfsadmin)"
 	@echo "     • RustFS API:     ${GREEN}http://localhost:9000${NC}"
@@ -263,7 +264,7 @@ dev-infra: ## Deploy infrastructure services (Redis, RustFS) only
 	@./scripts/dev/deploy-infrastructure.sh
 
 .PHONY: dev-observability
-dev-observability: ## Deploy observability stack (Jaeger, Prometheus, OTel) only
+dev-observability: ## Deploy observability stack (Jaeger, Prometheus, OTel, Grafana) only
 	@./scripts/dev/deploy-observability.sh
 
 .PHONY: dev-deploy

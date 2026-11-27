@@ -18,30 +18,15 @@ Complete observability guide for marrakesh, including distributed tracing, metri
 
 ```
 Application
-    │
-    ├─ Traces (OTLP/gRPC)
-    ├─ Metrics (OTLP/gRPC)
-    └─ Logs (Structured JSON)
-         │
-         ▼
-┌────────────────────────┐
-│ OpenTelemetry        │
-│ Collector            │
-└────────┬───────────────┘
-         │
-    ┌────┼────┐
-    │         │         │
-    ▼         ▼         ▼
-┌──────┐  ┌─────┐  ┌──────┐
-│Jaeger│  │Prometheus│
-│Traces│  │Metrics│  │Loki │
-└──────┘  └─────┘  │Logs │
-                     └──────┘
+    ├─ Traces (OTLP/gRPC) ──────────────► OTel Collector ──► Jaeger
+    ├─ Metrics (Prometheus /metrics) ───► Prometheus
+    └─ Logs (structured JSON) ──────────► stdout / cluster log collector
 ```
 
 **Local Development** (via make local-up):
 - Jaeger: http://localhost:16686
 - Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000 (`admin` / `admin`)
 - OpenTelemetry Collector: http://localhost:4317
 
 **Production**:
@@ -190,19 +175,36 @@ Metrics track numerical values over time for:
 
 ### Built-in Metrics
 
-**HTTP Metrics**:
+The app records metrics with the `metrics` crate and exposes them through
+`metrics-exporter-prometheus` at `GET /metrics`. Every metric carries the global
+`service` label, whose value is the Rust crate name.
+
+**HTTP metrics**:
 ```
-http_request_duration_seconds (histogram)
-http_request_total (counter)
-http_active_requests (gauge)
+http_requests_total (counter)              labels: service, status
+http_request_duration_seconds (histogram)  labels: service, status
+app_info (counter)                         labels: service
 ```
 
-**Tags**:
-- `method`: HTTP method (GET, POST, etc.)
-- `path`: Request path
-- `status`: HTTP status code (200, 404, 500, etc.)
+`status` is the HTTP status code. `method` and `path` are intentionally not
+recorded: a path label can grow without bound on unmatched routes. Add them in
+`src/routes.rs` if your traffic has a small, fixed route set.
 
 
+**Kafka publisher metrics**:
+```
+kafka_events_published_total (counter)   labels: service, topic
+kafka_events_failed_total (counter)      labels: service, topic, error_type
+kafka_publish_latency_ms (histogram)     labels: service, topic
+```
+
+
+
+
+
+CPU, memory, and disk metrics are not exposed by the app; they come from
+cluster monitoring (cAdvisor, kube-state-metrics, or your platform's container
+metrics).
 
 ### Accessing Prometheus
 
@@ -212,105 +214,72 @@ http_active_requests (gauge)
 
 ### PromQL Queries
 
-**Request Rate**:
+> `$service` is the Grafana template variable used by the generated dashboard.
+> When querying Prometheus directly, replace it with the crate name (for
+> example `service="my_service"`).
+
+**Request rate**:
 ```promql
 # Requests per second
-rate(http_request_total[1m])
+sum(rate(http_requests_total{service=~"$service"}[5m]))
 
-# Requests by path
-sum(rate(http_request_total[5m])) by (path)
+# By status
+sum by (status) (rate(http_requests_total{service=~"$service"}[5m]))
 
-# 95th percentile latency
-histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, path))
+# p95 latency
+histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{service=~"$service"}[5m])))
 ```
 
-**Error Rate**:
+**Error rate**:
 ```promql
-# Error rate
-rate(http_request_total{status=~"5.."}[5m])
+# Requests per second failing with 5xx
+sum(rate(http_requests_total{service=~"$service",status=~"5.."}[5m]))
 
-# Error rate by path
-sum(rate(http_request_total{status=~"5.."}[5m])) by (path)
-
-# Error percentage
-sum(rate(http_request_total{status=~"5.."}[5m])) / sum(rate(http_request_total[5m])) * 100
+# Error ratio (0..1)
+sum(rate(http_requests_total{service=~"$service",status=~"5.."}[5m]))
+  / clamp_min(sum(rate(http_requests_total{service=~"$service"}[5m])), 0.001)
 ```
 
 
-
-**S3 Metrics** (if custom metrics added):
+**Kafka publisher**:
 ```promql
-# Upload rate
-rate(s3_upload_total[5m])
-
-# Download latency
-histogram_quantile(0.99, s3_download_duration_seconds_bucket)
-
-# Failed S3 operations
-rate(s3_operation_total{status="error"}[5m])
+sum by (topic) (rate(kafka_events_published_total[5m]))
+sum by (topic, error_type) (rate(kafka_events_failed_total[5m]))
+histogram_quantile(0.99, sum by (le, topic) (rate(kafka_publish_latency_ms_bucket[5m])))
 ```
 
 
 
-**Resource Metrics**:
+
+**Resource metrics** (from cluster monitoring, not the app):
 ```promql
-# CPU usage
-rate(process_cpu_seconds_total[1m])
+# CPU usage by pod
+sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="marrakesh"}[5m]))
 
-# Memory usage
-process_resident_memory_bytes
-
-# Disk I/O
-rate(process_io_read_bytes_total[1m])
+# Memory working set by pod
+sum by (pod) (container_memory_working_set_bytes{namespace="marrakesh"})
 ```
+If your stack uses kube-state-metrics, `kube_pod_container_resource_requests` and
+`kube_pod_container_status_restarts_total` are also useful.
 
 ### Custom Metrics
 
-Create custom metrics:
+Record application metrics with the `metrics` crate macros (the app already
+installs the Prometheus recorder):
 
 ```rust
-use opentelemetry::{global, metrics::{Counter, Histogram, Gauge}};
+use metrics::{counter, gauge, histogram};
 
-pub struct MyMetrics {
-    pub upload_counter: Counter<u64>,
-    pub upload_size_histogram: Histogram<u64>,
-    pub active_downloads: Gauge<u64>,
-}
-
-impl MyMetrics {
-    pub fn new() -> Self {
-        let meter = global::meter("marrakesh");
-        
-        Self {
-            upload_counter: meter
-                .u64_counter("s3_upload_total")
-                .with_description("Total S3 uploads")
-                .init(),
-            upload_size_histogram: meter
-                .u64_histogram("s3_upload_size_bytes")
-                .with_description("S3 upload size distribution")
-                .init(),
-            active_downloads: meter
-                .u64_gauge("s3_active_downloads")
-                .with_description("Number of active S3 downloads")
-                .init(),
-        }
-    }
-}
-
-// Use in handler
-pub async fn upload_handler(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
-    let metrics = MyMetrics::new();
-    
-    // Record upload
-    metrics.upload_counter.add(1, &[]);
-    metrics.upload_size_record(data.len(), &[]);
-    
-    Ok(Json(json!({"status": "ok"})))
-}
+counter!("s3_upload_total").increment(1);
+histogram!("s3_upload_size_bytes").record(data.len() as f64);
+gauge!("s3_active_downloads").increment(1.0);
 ```
+
+Pre-register descriptions in `crates/service-core/src/observability.rs` with
+`describe_counter!`/`describe_histogram!` if the metric should appear before its
+first sample. Histogram buckets are configured globally in `init_metrics`
+(seconds by default); use `set_buckets_for_metric` for a different unit, as the
+Kafka latency histogram does for milliseconds.
 
 ### Exporting Metrics
 
@@ -325,25 +294,32 @@ curl http://localhost:8080/metrics
 
 Output:
 ```
-# HELP http_request_duration_seconds HTTP request latency
+# HELP http_requests_total Total number of HTTP requests
+# TYPE http_requests_total counter
+http_requests_total{service="my_service",status="200"} 45
+
+# HELP http_request_duration_seconds HTTP request latency in seconds
 # TYPE http_request_duration_seconds histogram
-http_request_duration_seconds_bucket{method="GET",path="/health/live",le="0.005"} 42
-http_request_duration_seconds_bucket{method="GET",path="/health/live",le="0.01"} 45
-http_request_duration_seconds_bucket{method="GET",path="/health/live",le="0.025"} 45
+http_request_duration_seconds_bucket{service="my_service",status="200",le="0.005"} 42
+http_request_duration_seconds_bucket{service="my_service",status="200",le="0.01"} 45
+http_request_duration_seconds_bucket{service="my_service",status="200",le="0.025"} 45
 ...
-http_request_duration_seconds_sum{method="GET",path="/health/live"} 0.15
-http_request_duration_seconds_count{method="GET",path="/health/live"} 45
+http_request_duration_seconds_sum{service="my_service",status="200"} 0.15
+http_request_duration_seconds_count{service="my_service",status="200"} 45
 ```
 
 ### Prometheus Scraping
 
-**Prometheus Configuration** (`deploy/dev/observability/prometheus.yaml.liquid`):
+**Prometheus Configuration** (`deploy/dev/observability/prometheus.yaml`):
 ```yaml
 scrape_configs:
-  - job_name: 'marrakesh'
+  - job_name: 'rust-service'
     static_configs:
-      - targets: ['host.docker.internal:8080']
-    scrape_interval: 15s
+      # Knative exposes 8080 directly; a Deployment Service fronts the pod
+      # with workload_service_port.
+      - targets: ['marrakesh.marrakesh.svc.cluster.local:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
 ```
 
 **Kubernetes ServiceMonitor**:
@@ -356,7 +332,9 @@ metadata:
 spec:
   selector:
     matchLabels:
+
       serving.knative.dev/service: marrakesh
+
   endpoints:
   - port: http
     path: /metrics
@@ -503,7 +481,7 @@ spec:
   - name: errors
     rules:
     - alert: HighErrorRate
-      expr: rate(http_request_total{status=~"5.."}[5m]) > 0.05
+      expr: sum(rate(http_requests_total{status=~"5.."}[5m])) > 0.05
       for: 5m
       annotations:
         summary: "High error rate on marrakesh"
@@ -524,14 +502,14 @@ spec:
         severity: warning
 ```
 
-**Pod Not Ready**:
+**Scrape target down**:
 ```yaml
-    - alert: PodNotReady
-      expr: knative_pod_status{status!="Ready"} > 0
+    - alert: TargetDown
+      expr: up == 0
       for: 2m
       annotations:
-        summary: "Pod not ready"
-        description: "{{ $value }} pods not ready"
+        summary: "Prometheus target is down"
+        description: "{{ $labels.job }} has been unreachable for 2 minutes"
       labels:
         severity: critical
 ```
@@ -581,63 +559,40 @@ spec:
 
 ## Dashboards
 
-### Grafana Dashboard Example
 
-**Recommended Panels**:
+The generated project ships a Grafana dashboard as a labeled ConfigMap
+(`deploy/components/grafana-dashboards`) and provisions it automatically in the
+local dev stack. See [`docs/GRAFANA_DASHBOARDS.md`](GRAFANA_DASHBOARDS.md) for
+the sidecar contract, production wiring, and customization.
 
-1. **Request Rate**: `sum(rate(http_request_total[5m])) by (path)`
-2. **Error Rate**: `sum(rate(http_request_total{status=~"5.."}[5m])) by (path)`
-3. **P95 Latency**: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, path))`
-4. **Active Requests**: `http_active_requests`
-5. **CPU Usage**: `rate(process_cpu_seconds_total[1m]) * 100`
-6. **Memory Usage**: `process_resident_memory_bytes`
-7. **Error Log Count**: `count_over_time({level="error"}[5m])`
-8. **S3 Upload Rate**: `rate(s3_upload_total[5m])`
-9. **S3 Operation Latency**: `histogram_quantile(0.99, s3_operation_duration_seconds_bucket)`
 
-### Dashboard JSON Template
+### Metric contract
 
-Import into Grafana:
+The application exports these metrics from `/metrics`:
 
-```json
-{
-  "dashboard": {
-    "title": "marrakesh Dashboard",
-    "panels": [
-      {
-        "title": "Request Rate",
-        "targets": [
-          {
-            "expr": "sum(rate(http_request_total[5m])) by (path)",
-            "legendFormat": "{{ path }}"
-          }
-        ],
-        "type": "graph"
-      },
-      {
-        "title": "Error Rate",
-        "targets": [
-          {
-            "expr": "sum(rate(http_request_total{status=~\"5..\"}[5m]))",
-            "legendFormat": "Errors"
-          }
-        ],
-        "type": "graph"
-      },
-      {
-        "title": "P95 Latency",
-        "targets": [
-          {
-            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
-            "legendFormat": "P95"
-          }
-        ],
-        "type": "graph"
-      }
-    ]
-  }
-}
-```
+| Metric | Type | Labels |
+|---|---|---|
+| `http_requests_total` | counter | `service`, `status` |
+| `http_request_duration_seconds` | histogram | `service`, `status` |
+| `app_info` | counter | `service` |
+| `kafka_events_published_total` | counter | `service`, `topic` |
+| `kafka_events_failed_total` | counter | `service`, `topic`, `error_type` |
+| `kafka_publish_latency_ms` | histogram | `service`, `topic` |
+
+
+`service` is a global label whose value is the Rust crate name. CPU and memory
+are collected by Kubernetes/cAdvisor (or kube-state-metrics), not by the
+application.
+
+**Example panels**:
+
+1. **Request rate**: `sum(rate(http_requests_total{service=~"$service"}[$__rate_interval]))`
+2. **Error ratio**: `sum(rate(http_requests_total{service=~"$service",status=~"5.."}[$__rate_interval])) / clamp_min(sum(rate(http_requests_total{service=~"$service"}[$__rate_interval])), 0.001)`
+3. **p95 latency**: `histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{service=~"$service"}[$__rate_interval])))`
+4. **Targets up**: `sum(up{job=~"$job"})`
+
+For CNPG PostgreSQL panels, use the official dashboard described in
+[`docs/POSTGRES_MONITORING.md`](POSTGRES_MONITORING.md).
 
 ---
 
@@ -663,7 +618,7 @@ Import into Grafana:
 ### SLIs and SLOs
 
 **SLI (Service Level Indicator)**:
-- Metric: `http_request_total{status="200"} / http_request_total`
+- Metric: `http_requests_total{status=~"2.."} / http_requests_total`
 - Time window: 7 days rolling
 
 **SLO (Service Level Objective)**:

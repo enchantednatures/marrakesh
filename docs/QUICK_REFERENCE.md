@@ -142,6 +142,8 @@ cargo run
 # View observability
 # Jaeger: http://localhost:16686
 # Prometheus: http://localhost:9090
+# Grafana: http://localhost:3000 (admin/admin)
+
 ```
 
 ## Documentation Files
@@ -150,6 +152,9 @@ cargo run
 - **DEPLOYMENT.md** - Production deployment procedures
 
 - **MONITORING.md** - Observability setup and dashboards
+
+- **GRAFANA_DASHBOARDS.md** - Dashboard provisioning and customization
+
 
 - **KAFKA_EVENTING.md** - Event-driven architecture guide
 

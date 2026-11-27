@@ -85,6 +85,12 @@ echo -e "${YELLOW}→${NC} Prometheus (9090)"
 kubectl port-forward -n observability svc/prometheus 9090:9090 >/dev/null 2>&1 &
 PROMETHEUS_PID=$!
 
+
+echo -e "${YELLOW}→${NC} Grafana (3000)"
+kubectl port-forward -n observability svc/grafana 3000:3000 >/dev/null 2>&1 &
+GRAFANA_PID=$!
+
+
 APP_FORWARDED=false
 if [[ -n "$SERVICE" ]]; then
   if kubectl get service "$SERVICE" -n default 2>/dev/null >/dev/null; then
@@ -109,6 +115,9 @@ else
 fi
 echo "  • Jaeger UI:     http://localhost:16686"
 echo "  • Prometheus:    http://localhost:9090"
+
+echo "  • Grafana:       http://localhost:3000 (admin/admin)"
+
 echo "  • Redis:         localhost:6379"
 if kubectl get service rustfs -n rustfs 2>/dev/null >/dev/null; then
   echo "  • RustFS API:     http://localhost:9000"

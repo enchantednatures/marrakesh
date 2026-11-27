@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Grafana dashboard `marrakesh-overview`, generated as a labeled ConfigMap in
+  `deploy/components/grafana-dashboards` and discovered by the home cluster's
+  kube-prometheus-stack dashboard sidecar. HTTP metrics now carry a `status`
+  label, `http_request_duration_seconds` is a true Prometheus histogram, and a
+  `PodMonitor` scrapes the Knative revision pods for app metrics.
 - `workload_type` prompt (`Knative` default, `Deployment` alternative) for
   long-lived services such as WebSockets and SSE. Deployment mode renders an
   `apps/v1 Deployment`, a core Service, and an optional PodDisruptionBudget

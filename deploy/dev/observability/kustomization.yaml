@@ -7,3 +7,4 @@ resources:
   - jaeger.yaml
   - prometheus.yaml
   - otel-collector.yaml
+  - grafana.yaml

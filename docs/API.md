@@ -100,26 +100,29 @@ curl http://localhost:8080/metrics
 
 **Response** (sample):
 ```
-# HELP http_request_duration_seconds HTTP request latency
+# HELP http_request_duration_seconds HTTP request latency in seconds
 # TYPE http_request_duration_seconds histogram
-http_request_duration_seconds_bucket{method="GET",path="/health/live",le="0.005"} 42
-http_request_duration_seconds_bucket{method="GET",path="/health/live",le="0.01"} 45
-http_request_duration_seconds_bucket{method="GET",path="/health/live",le="0.025"} 45
-http_request_duration_seconds_bucket{method="GET",path="/health/live",le="0.05"} 45
+http_request_duration_seconds_bucket{service="my_service",status="200",le="0.005"} 42
+http_request_duration_seconds_bucket{service="my_service",status="200",le="0.01"} 45
+http_request_duration_seconds_bucket{service="my_service",status="200",le="0.025"} 45
+http_request_duration_seconds_bucket{service="my_service",status="200",le="0.05"} 45
 ...
-http_request_duration_seconds_sum{method="GET",path="/health/live"} 0.15
-http_request_duration_seconds_count{method="GET",path="/health/live"} 45
+http_request_duration_seconds_sum{service="my_service",status="200"} 0.15
+http_request_duration_seconds_count{service="my_service",status="200"} 45
 
-# HELP http_request_total HTTP request count
-# TYPE http_request_total counter
-http_request_total{method="GET",path="/health/live",status="200"} 45
+# HELP http_requests_total Total number of HTTP requests
+# TYPE http_requests_total counter
+http_requests_total{service="my_service",status="200"} 45
 ```
 
 **Metrics Exposed**:
-- `http_request_duration_seconds` (histogram) - Request latency by method, path, status
-- `http_request_total` (counter) - Request count by method, path, status
-- `http_active_requests` (gauge) - Currently active requests
+- `http_request_duration_seconds` (histogram) - Request latency by status
+- `http_requests_total` (counter) - Request count by status
+- `app_info` (counter) - Application identity
+- `kafka_events_*` and `kafka_publish_latency_ms` - Kafka publisher metrics
 - Custom application metrics (see `docs/MONITORING.md`)
+
+Every metric carries the global `service` label (the Rust crate name).
 
 **Use Case**: Prometheus scraping, alerting, dashboards
 

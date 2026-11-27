@@ -1,0 +1,18 @@
+# The home cluster runs kube-prometheus-stack. Its Prometheus does not honor
+# the `prometheus.io/scrape` annotations the ksvc chart puts on the Knative
+# Service, so scrape the revision pods directly. The port name comes from the
+# Knative user container (`user-port`, 8080).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: marrakesh
+  labels:
+    app.kubernetes.io/part-of: marrakesh
+spec:
+  selector:
+    matchLabels:
+      serving.knative.dev/service: marrakesh
+  podMetricsEndpoints:
+    - port: user-port
+      path: /metrics
+      interval: 15s

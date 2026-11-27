@@ -1,8 +1,6 @@
-use metrics::describe_counter;
-#[cfg(feature = "kafka")]
-use metrics::describe_histogram;
+use metrics::{describe_counter, describe_histogram};
 
-use metrics_exporter_prometheus::PrometheusHandle;
+use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::{global, trace::TracerProvider};
 use opentelemetry_otlp::WithExportConfig;
@@ -17,10 +15,14 @@ use crate::config::TelemetryConfig;
 /// Returns a PrometheusHandle that can be used to render metrics at the /metrics endpoint.
 ///
 /// Sets up Prometheus metrics for:
+/// - http_requests_total: Counter for HTTP requests (status label)
+/// - http_request_duration_seconds: Histogram for HTTP latency (status label)
 /// - kafka_events_published_total: Counter for successfully published events
 /// - kafka_events_failed_total: Counter for failed publish attempts
 /// - kafka_publish_latency_ms: Histogram for publishing latency
-/// - HTTP request metrics (via tower-http)
+///
+/// Histogram buckets are configured explicitly so the exporter renders true
+/// Prometheus histograms (`_bucket`/`_sum`/`_count`) instead of summaries.
 ///
 /// Kafka metrics are tagged with:
 /// - topic: The Kafka topic where events are published
@@ -29,14 +31,31 @@ use crate::config::TelemetryConfig;
 /// `service_name` is recorded as the global `service` label (pass the
 /// application package name so dashboards stay stable across the refactor).
 pub fn init_metrics(service_name: &str) -> anyhow::Result<PrometheusHandle> {
-    // Initialize the metrics-exporter-prometheus and get the handle for rendering
-    let handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+    // Initialize the metrics-exporter-prometheus and get the handle for
+    // rendering. Buckets turn distributions into true Prometheus histograms:
+    // without them the exporter renders summaries and `_bucket` series (used by
+    // histogram_quantile and the generated dashboard) never exist.
+    let handle = PrometheusBuilder::new()
+        .set_buckets(&[
+            0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+        ])?
+        // Kafka publish latency is recorded in milliseconds, not seconds.
+        .set_buckets_for_metric(
+            Matcher::Suffix("kafka_publish_latency_ms".to_string()),
+            &[
+                1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0,
+            ],
+        )?
         .add_global_label("service", service_name)
         .install_recorder()?;
 
     // Pre-register metrics with descriptions to ensure Prometheus format is emitted
     // even before any requests are made
     describe_counter!("http_requests_total", "Total number of HTTP requests");
+    describe_histogram!(
+        "http_request_duration_seconds",
+        "HTTP request latency in seconds"
+    );
     describe_counter!("app_info", "Application information and version");
 
     #[cfg(feature = "s3")]

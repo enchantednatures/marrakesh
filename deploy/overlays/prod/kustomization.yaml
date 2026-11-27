@@ -17,7 +17,7 @@ components:
   
   
   - ../../components/postgres
-  
+  - ../../components/grafana-dashboards
 
 patches:
   - target:

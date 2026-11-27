@@ -50,7 +50,7 @@ cargo --version
 ### Starting Local Development Environment
 
 ```bash
-# Start all services (Kind cluster with Knative, Redis, RustFS, Jaeger, Prometheus, OTEL Collector)
+# Start all services (Kind cluster with Knative, Redis, RustFS, Jaeger, Prometheus, OTEL Collector, Grafana)
 make local-up
 
 # Verify services are running
@@ -341,46 +341,29 @@ async fn test_copy_object() {
 
 ### Adding Custom Metrics
 
+The app installs the `metrics` crate recorder and renders `/metrics` through
+`metrics-exporter-prometheus`. Record custom series with the macros:
+
 ```rust
-use opentelemetry::metrics::{Counter, Histogram};
-use opentelemetry::{global, KeyValue};
+use metrics::{counter, gauge, histogram};
 
-pub struct Metrics {
-    pub request_count: Counter<u64>,
-    pub request_duration: Histogram<f64>,
-}
-
-impl Metrics {
-    pub fn new() -> Self {
-        let meter = global::meter("marrakesh");
-        
-        Metrics {
-            request_count: meter
-                .u64_counter("http_requests_total")
-                .with_description("Total HTTP requests")
-                .init(),
-            request_duration: meter
-                .f64_histogram("http_request_duration_seconds")
-                .with_description("HTTP request duration")
-                .init(),
-        }
-    }
-}
-
-// Use in handler
 pub async fn my_handler() -> impl IntoResponse {
-    let metrics = Metrics::new();
     let start = std::time::Instant::now();
-    
+
     // Your handler logic here
-    
-    let duration = start.elapsed().as_secs_f64();
-    metrics.request_duration.record(duration, &[]);
-    metrics.request_count.add(1, &[]);
-    
+
+    counter!("my_requests_total").increment(1);
+    histogram!("my_request_duration_seconds").record(start.elapsed().as_secs_f64());
+    gauge!("my_in_flight_requests").increment(1.0);
+
     StatusCode::OK
 }
 ```
+
+Pre-register descriptions in `crates/service-core/src/observability.rs` with
+`describe_counter!`/`describe_histogram!` if the metric should appear before its
+first sample. Histogram buckets are configured in `init_metrics`; use
+`set_buckets_for_metric` when the metric uses a unit other than seconds.
 
 ### Adding Custom Tracing Spans
 

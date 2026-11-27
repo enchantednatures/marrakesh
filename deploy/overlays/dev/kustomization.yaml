@@ -22,10 +22,15 @@ resources:
   # Redpanda Console for the app's managed Kafka (marrakesh-kafka:9093).
   - console.yaml
   - console-virtualservice.yaml
+  # The home cluster's Prometheus Operator does not honor the chart's
+  # prometheus.io/scrape annotations; scrape the Knative revision pods
+  # explicitly so the Grafana dashboard has data.
+  - podmonitor.yaml
 
 components:
   - ../../components/postgres
   - ../../components/postgres-pooler
+  - ../../components/grafana-dashboards
 
 patches:
   - target:

@@ -1,0 +1,197 @@
+# Dev-only Grafana. It provisions the Prometheus datasource and uses the
+# k8s-sidecar to load every ConfigMap labeled `grafana_dashboard: "1"` from the
+# application namespace (the same contract kube-prometheus-stack uses).
+#
+# The dashboard itself is rendered by deploy/components/grafana-dashboards and
+# only shipped when feature_grafana_dashboards is enabled.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grafana
+---
+# The sidecar uses the pod service account to list/watch ConfigMaps in
+# marrakesh. Cluster-scoped RBAC keeps the dev manifest independent
+# of the kustomization's `namespace: observability` transformer; it is dev-only
+# and grants read access to ConfigMaps, never Secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: marrakesh-grafana-dashboard-reader
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: marrakesh-grafana-dashboard-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: marrakesh-grafana-dashboard-reader
+subjects:
+  - kind: ServiceAccount
+    name: grafana
+    namespace: observability
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+data:
+  prometheus.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus.observability.svc.cluster.local:9090
+        isDefault: true
+        editable: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: app-dashboards
+        orgId: 1
+        folder: Apps
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      serviceAccountName: grafana
+      # The Grafana image runs as uid/gid 472. fsGroup makes the emptyDir
+      # volumes writable for it; the sidecar still runs as root and can write
+      # the shared dashboards directory.
+      securityContext:
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GF_PATHS_DATA
+              value: /tmp/grafana
+            - name: GF_SECURITY_ADMIN_USER
+              value: admin
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: admin
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            # The sidecar writes the dashboard key verbatim (UNIQUE_FILENAMES=false).
+            - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
+              value: /var/lib/grafana/dashboards/marrakesh-overview.json
+          ports:
+            - name: web
+              containerPort: 3000
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+            - name: data
+              mountPath: /tmp/grafana
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          securityContext:
+            runAsUser: 472
+            runAsGroup: 472
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+        # Watches the application namespace and writes each labeled ConfigMap
+        # key into the shared dashboards volume. This mirrors the
+        # kube-prometheus-stack dashboard sidecar contract.
+        - name: dashboards
+          image: kiwigrid/k8s-sidecar:1.27.4
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LABEL
+              value: grafana_dashboard
+            - name: LABEL_VALUE
+              value: "1"
+            - name: FOLDER
+              value: /var/lib/grafana/dashboards
+            - name: RESOURCE
+              value: configmap
+            - name: NAMESPACE
+              value: "marrakesh"
+            - name: UNIQUE_FILENAMES
+              value: "false"
+          volumeMounts:
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboards
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  labels:
+    app: grafana
+spec:
+  selector:
+    app: grafana
+  ports:
+    - name: web
+      port: 3000
+      targetPort: 3000
+  type: ClusterIP

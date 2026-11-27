@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Grafana dashboard provisioning for the first service. The ConfigMap carries
+# the `grafana_dashboard: "1"` label picked up by the Grafana sidecar
+# (kube-prometheus-stack) and by the dev Grafana in deploy/dev/observability.
+# Include this component from the per-environment overlays when
+# feature_grafana_dashboards is enabled.
+resources:
+  - dashboard.yaml

@@ -42,7 +42,7 @@ Procedures for operating marrakesh in production.
 **Manual Detection**:
 ```bash
 # Check error rate
-curl http://localhost:8080/metrics | grep http_request_total | grep 5..
+curl http://localhost:8080/metrics | grep http_requests_total | grep 'status="5'
 
 # Check latency
 curl http://localhost:8080/metrics | grep http_request_duration_seconds

@@ -16,6 +16,7 @@ A production-ready Rust microservice for Knative Serverless and FluxCD GitOps, w
 - 🚦 **Canary Releases**: Automated progressive delivery with Flagger (Knative provider)
 - 🏃 **Self-Hosted Runners**: ARC runner scale set with a Docker-in-Docker sidecar
 - 🔍 **Observability**: OpenTelemetry instrumentation with Jaeger and Prometheus
+- 📈 **Grafana Dashboard**: A feature-aware dashboard provisioned through a labeled ConfigMap
 - 🔄 **GitOps Ready**: FluxCD manifests for automated deployments
 - 🧪 **Tested**: Unit, contract, and integration tests wired into CI
 - 📝 **Type-Safe**: Rust 2024 edition with strict compiler checks
@@ -48,7 +49,7 @@ mode does not need Knative.
 
 The local environment is a Kind cluster with a local container registry,
 Knative Serving, Redis, RustFS, CloudNativePG, Kafka and the
-observability stack (Jaeger, Prometheus, OTel Collector).
+observability stack (Jaeger, Prometheus, OTel Collector, Grafana).
 
 ```bash
 # Create the cluster and deploy everything (takes a few minutes the first time)
@@ -63,6 +64,7 @@ make dev-forward
 | Application | http://localhost:8080 |
 | Jaeger UI | http://localhost:16686 |
 | Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 (`admin` / `admin`) |
 | RustFS API | http://localhost:9000 |
 | RustFS console | http://localhost:9001 (`rustfsadmin` / `rustfsadmin`, local dev only) |
 
@@ -379,8 +381,9 @@ Kellnr token is a BuildKit secret and is never written into an image layer.
 ## Observability
 
 - **Traces**: OTLP → Jaeger, B3 headers propagated through Knative and Kafka.
-- **Metrics**: Prometheus scrapes `/metrics` (HTTP latency, Redis, publisher and Knative metrics).
+- **Metrics**: Prometheus scrapes `/metrics` (HTTP request rate, status, and latency, Kafka publisher metrics).
 - **Logs**: structured `tracing` output with request IDs.
+- **Dashboards**: the `marrakesh-overview` Grafana dashboard is provisioned via a labeled ConfigMap; see `docs/GRAFANA_DASHBOARDS.md`.
 
 See `docs/MONITORING.md` and `docs/RUNBOOKS.md`.
 
