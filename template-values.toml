@@ -13,8 +13,9 @@
 #     --silent --allow-commands
 #
 # The output is the template baseline only. This repository intentionally keeps
-# home-cluster overrides on top of it (external RustFS/Tempo, Dragonfly, pinned
-# image tags, operator wiring, Prometheus addresses, CI runner sizing). Diff the
+# home-cluster overrides on top of it (chart-provisioned Ceph RGW buckets,
+# external Tempo, Dragonfly, pinned image tags, operator wiring, Prometheus
+# addresses, CI runner sizing). Diff the
 # regenerated tree against this repository to review template drift, then port
 # the template-owned changes and re-apply those overrides.
 #

@@ -15,11 +15,6 @@ resources:
 
 patches:
 
-  # This repo's dev overlay uses external RustFS rather than chart-created
-  # ObjectBucketClaims, so there is nothing to clear here. Kind is not the
-  # primary target for marrakesh; the home-cluster overlay is the supported
-  # deployment path.
-  #
   # The empty map is the chart default: use `add` rather than `remove` so the
   # patch also works for a project whose dev overlay never declares
   # `objectBuckets` (a JSON6902 `remove` fails the whole render when the path

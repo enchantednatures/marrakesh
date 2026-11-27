@@ -32,9 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `make ci-secrets` / `make ci-secrets-check` and a `make deploy`
   preflight (via `scripts/bootstrap-ci-secrets.sh`) to set/verify the
   `KELLNR_TOKEN` Actions secret from the local Cargo/Kellnr token.
-- Preserved the home-cluster overrides: external RustFS and Tempo, Dragonfly,
-  cluster-wide Flagger/CNPG/ARC wiring, the `kube-prometheus-stack` metric
-  gates, the pinned app image tag, and the ARC runner sizing.
+- Dev object storage and PostgreSQL backups now use chart-provisioned Ceph RGW
+  buckets instead of the external RustFS (`rustfs-service.networking`).
+  `objectBuckets` declares `marrakesh-app-data` (`ceph-bucket`) and
+  `marrakesh-postgres-backups` (`ceph-bucket-retain`); the app reads the
+  claim-named Secret/ConfigMap, and the CNPG `ObjectStore` writes to
+  `s3://marrakesh-postgres-backups/`. The local Kind overlay still clears the
+  claims and falls back to its in-cluster RustFS.
+- Preserved the home-cluster overrides: chart-provisioned Ceph RGW buckets,
+  external Tempo, Dragonfly, cluster-wide Flagger/CNPG/ARC wiring, the
+  `kube-prometheus-stack` metric gates, the pinned app image tag, and the ARC
+  runner sizing.
 
 ### Changed (template sync, 2026-11-05)
 

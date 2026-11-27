@@ -60,9 +60,9 @@ patches:
             cpu: "500m"
             memory: "256Mi"
       # Replaces the base env list; must keep every entry the app needs.
-      # Backends: chart-managed Dragonfly (cache), external RustFS (S3),
-      # Tempo (OTLP), chart-managed Redpanda (Kafka), CNPG via the PgBouncer
-      # pooler.
+      # Backends: chart-managed Dragonfly (cache), chart-provisioned Ceph RGW
+      # bucket (S3), Tempo (OTLP), chart-managed Redpanda (Kafka), CNPG via
+      # the PgBouncer pooler.
       - op: replace
         path: /spec/values/services/app/env
         value:
@@ -72,24 +72,42 @@ patches:
             value: "8080"
           - name: APP__REDIS__URL
             value: "redis://marrakesh-dragonfly.marrakesh.svc.cluster.local:6379"
-          - name: APP__S3__ENDPOINT
-            value: "http://rustfs-service.networking.svc.cluster.local:9000"
-          - name: APP__S3__BUCKET
-            value: "marrakesh"
-          - name: APP__S3__REGION
-            value: "us-east-1"
-          # The home cluster replicates the RustFS backup credentials into every
-          # namespace as pg-rustfs-backup-secret (Kyverno generating policy).
+          # Object storage comes from the chart-provisioned ObjectBucketClaim
+          # "marrakesh-app-data" (see the objectBuckets patch below). The
+          # cluster bucket provisioner publishes the credentials Secret and
+          # the bucket identity ConfigMap under the claim name, in this
+          # namespace.
           - name: AWS_ACCESS_KEY_ID
             valueFrom:
               secretKeyRef:
-                name: pg-rustfs-backup-secret
-                key: aws-access-key-id
+                name: "marrakesh-app-data"
+                key: AWS_ACCESS_KEY_ID
           - name: AWS_SECRET_ACCESS_KEY
             valueFrom:
               secretKeyRef:
-                name: pg-rustfs-backup-secret
-                key: aws-secret-access-key
+                name: "marrakesh-app-data"
+                key: AWS_SECRET_ACCESS_KEY
+          # BUCKET_HOST/BUCKET_PORT must be declared BEFORE APP__S3__ENDPOINT:
+          # Kubernetes expands $(VAR) references using earlier entries only.
+          - name: BUCKET_HOST
+            valueFrom:
+              configMapKeyRef:
+                name: "marrakesh-app-data"
+                key: BUCKET_HOST
+          - name: BUCKET_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: "marrakesh-app-data"
+                key: BUCKET_PORT
+          - name: APP__S3__ENDPOINT
+            value: "http://$(BUCKET_HOST):$(BUCKET_PORT)"
+          - name: APP__S3__BUCKET
+            valueFrom:
+              configMapKeyRef:
+                name: "marrakesh-app-data"
+                key: BUCKET_NAME
+          - name: APP__S3__REGION
+            value: "us-east-1"
           - name: APP__TELEMETRY__OTLP_ENDPOINT
             value: "http://tempo-distributor.monitoring.svc.cluster.local:4317"
           - name: APP__TELEMETRY__SERVICE_NAME
@@ -139,6 +157,28 @@ patches:
         path: /spec/values/kafka/sources/events/initialOffset
         value: earliest
 
+  # Ceph RGW buckets provisioned by the chart (ksvc `objectBuckets`). The
+  # home cluster runs the Rook bucket provisioner and the `ceph-bucket*`
+  # StorageClasses, so each claim binds to a real bucket and publishes a
+  # claim-named Secret (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY) plus a
+  # ConfigMap (BUCKET_HOST/BUCKET_PORT/BUCKET_NAME) in this namespace.
+  # The Kind overlay clears this map and falls back to its in-cluster RustFS.
+  - target:
+      kind: HelmRelease
+      name: marrakesh
+    patch: |-
+      - op: add
+        path: /spec/values/objectBuckets
+        value:
+          postgres-backups:
+            # Retain so pruning the claim can never destroy backups.
+            storageClassName: "ceph-bucket-retain"
+            endpointURL: "http://rook-ceph-rgw-ceph-objectstore.rook-ceph.svc:80"
+            bucketName: "marrakesh-postgres-backups"
+          app-data:
+            storageClassName: "ceph-bucket"
+            bucketName: "marrakesh-app-data"
+
   # Per-env CloudNativePG sizing (the component base carries prod-leaning
   # defaults). The base already carries pod resources and the ceph-block
   # StorageClass, so only the instance count and Barman layout are patched.
@@ -149,35 +189,24 @@ patches:
       - op: replace
         path: /spec/instances
         value: 1
-      # Barman layout convention on this cluster: all app backups share the
-      # `cloudnative-pg` bucket, namespaced per server via serverName.
+      # Per-server prefix inside the dedicated backup bucket (barman layout).
       - op: add
         path: /spec/plugins/0/parameters/serverName
         value: "marrakesh-v1"
 
-  # Backup storage adapted to the home cluster's external RustFS
-  # (rustfs-service.networking:9000) with the Kyverno-replicated
-  # pg-rustfs-backup-secret. Per-server prefix keeps retention scoped to
-  # marrakesh-v1 objects only.
+  # Backups go to the chart-provisioned Ceph RGW bucket
+  # (marrakesh-postgres-backups); credentials come from the claim-named
+  # Secret, so the base s3Credentials reference is kept.
   - target:
       kind: ObjectStore
       name: "marrakesh-postgres-backup-store"
     patch: |-
       - op: replace
         path: /spec/configuration/endpointURL
-        value: "http://rustfs-service.networking.svc.cluster.local:9000"
+        value: "http://rook-ceph-rgw-ceph-objectstore.rook-ceph.svc:80"
       - op: replace
         path: /spec/configuration/destinationPath
-        value: "s3://cloudnative-pg/"
-      - op: replace
-        path: /spec/configuration/s3Credentials
-        value:
-          accessKeyId:
-            name: pg-rustfs-backup-secret
-            key: aws-access-key-id
-          secretAccessKey:
-            name: pg-rustfs-backup-secret
-            key: aws-secret-access-key
+        value: "s3://marrakesh-postgres-backups/"
       - op: replace
         path: /spec/retentionPolicy
         value: "7d"
